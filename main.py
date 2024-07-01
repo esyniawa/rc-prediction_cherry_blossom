@@ -50,7 +50,7 @@ for run in range(n_runs):
     # Function to run the reservoir and collect states
     def run_reservoir(inputs: pd.DataFrame,
                       mean_pop: int | None = 50,
-                      period: int = 10):
+                      period: int = 2):
         states = []
         for i, row in inputs.iterrows():
 
@@ -59,12 +59,12 @@ for run in range(n_runs):
             @ann.every(period=period)
             def set_inputs(n):
                 # Set inputs to the network
-                inp[0].r = row['Temps'][n]  # Temps as dynamic input
-                inp[1].r = row['Lat']  # Lat
-                inp[2].r = row['Lng']  # Lng
+                inp[0].baseline = row['Temps'][n]  # Temps as dynamic input
+                inp[1].baseline = row['Lat']  # Lat
+                inp[2].baseline = row['Lng']  # Lng
 
             # simulate
-            ann.simulate(period * len_temps, callbacks=True)  # Run the simulation for 100 milliseconds
+            ann.simulate(period * len_temps, callbacks=True)
 
             if mean_pop is not None:
                 state = monitor.get(variables='r', keep=False)[-mean_pop:]
@@ -73,6 +73,7 @@ for run in range(n_runs):
                 state = monitor.get(variables='r', keep=False)[-1]
 
             states.append(state)
+            ann.reset()
 
         return np.array(states)
 
@@ -103,13 +104,14 @@ for run in range(n_runs):
 
     if do_plot:
         fig = plt.figure()
-        plt.plot(test, label='True')
-        plt.plot(pred, label='Predicted', alpha=0.8)
+        plt.plot(test, label='True', color='b')
+        plt.plot(pred, label='Predicted', alpha=0.8, marker=".", markersize=2,
+                 linestyle='None', color='r')
         plt.legend()
         plt.title(f'Sakura Blossom Date Prediction N={N}')
         plt.savefig(f'figures/{run}', bbox_inches='tight')
         plt.close(fig)
 
 
-np.save('results', np.array(results_mse))
+np.save('results.npy', np.array(results_mse))
 

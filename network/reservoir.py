@@ -10,7 +10,7 @@ sim_time = 100  # simulation time over input
 ########################################################## ANNarchy/ESN ########################################################
 ann.clear()
 # step size 1 millisecond
-ann.setup(dt=1.0, num_threads=4)
+ann.setup(dt=1.0, num_threads=6)
 
 # The neuron has three parameters and two variables
 ESN_Neuron = ann.Neuron(
