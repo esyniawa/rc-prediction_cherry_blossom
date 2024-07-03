@@ -17,9 +17,9 @@ import os
 from network.reservoir import *
 from monitoring import PopMonitor
 
-
 n_runs = 20
 do_plot = True
+save_reservoir_states = True
 
 # If figures need to be stored
 if do_plot and not os.path.exists('figures'):
@@ -50,7 +50,7 @@ for run in range(n_runs):
     # Function to run the reservoir and collect states
     def run_reservoir(inputs: pd.DataFrame,
                       mean_pop: int | None = 50,
-                      period: int = 2):
+                      period: int = 5):
         states = []
         for i, row in inputs.iterrows():
 
@@ -79,13 +79,18 @@ for run in range(n_runs):
 
 
     # Run the reservoir on the training data
+    print(f'Training Run {run}.')
     reservoir_states_train = run_reservoir(X_train)
+
+    if save_reservoir_states:
+        np.save(f'training_states_run{run}.npy', reservoir_states_train)
 
     # Train output weights using Lasso regression
     lasso = linear_model.Lasso(alpha=0.001, max_iter=10000)
     lasso.fit(reservoir_states_train, Y_train)
 
     # Run the reservoir on the testing data
+    print(f'Testing Run {run}.')
     reservoir_states_test = run_reservoir(X_test)
 
     # Make predictions
