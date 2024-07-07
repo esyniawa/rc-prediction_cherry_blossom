@@ -49,8 +49,8 @@ for run in range(n_runs):
     ######################################################## Training part ###########################################
     # Function to run the reservoir and collect states
     def run_reservoir(inputs: pd.DataFrame,
-                      mean_pop: int | None = 50,
-                      period: int = 5):
+                      mean_pop: int | None = 30,
+                      period: int = 1):
         states = []
         for i, row in inputs.iterrows():
 
@@ -64,7 +64,10 @@ for run in range(n_runs):
                 inp[2].baseline = row['Lng']  # Lng
 
             # simulate
-            ann.simulate(period * len_temps, callbacks=True)
+            try:
+                ann.simulate(period * len_temps, callbacks=True)
+            except:
+                print(row['City'], row['Session'])
 
             if mean_pop is not None:
                 state = monitor.get(variables='r', keep=False)[-mean_pop:]
@@ -86,7 +89,7 @@ for run in range(n_runs):
         np.save(f'training_states_run{run}.npy', reservoir_states_train)
 
     # Train output weights using Lasso regression
-    lasso = linear_model.Lasso(alpha=0.001, max_iter=10000)
+    lasso = linear_model.Lasso(alpha=0.001, max_iter=100_000)
     lasso.fit(reservoir_states_train, Y_train)
 
     # Run the reservoir on the testing data

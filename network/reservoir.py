@@ -39,7 +39,7 @@ InputNeuron = ann.Neuron(
 reservoir_pop = ann.Population(N, ESN_Neuron)
 
 # Specify some of the parameters
-reservoir_pop.tau = 20.0
+reservoir_pop.tau = 10.0
 reservoir_pop.g = 1.5
 reservoir_pop.noise = 0.0
 
