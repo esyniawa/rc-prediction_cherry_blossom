@@ -3,8 +3,6 @@
 import numpy as np
 import pandas as pd
 
-np.random.RandomState(1)
-
 import matplotlib.pyplot as plt
 from sakura_data import load_sakura_data, create_sakura_data
 from sklearn import preprocessing
@@ -67,7 +65,7 @@ for run in range(n_runs):
             try:
                 ann.simulate(period * len_temps, callbacks=True)
             except:
-                print(row['City'], row['Session'])
+                print(row.index)
 
             if mean_pop is not None:
                 state = monitor.get(variables='r', keep=False)[-mean_pop:]
