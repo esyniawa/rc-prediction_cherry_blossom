@@ -41,9 +41,10 @@ scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
 scaler.fit_transform(output_df.values.reshape(-1, 1))
 
 for run in range(n_runs):
+    print(f'Run {run}.')
+
     # Splitting the data
     X_train, X_test, Y_train, Y_test = train_test_split(input_df, output_df, test_size=0.3, shuffle=True)
-
     ######################################################## Training part ###########################################
     # Function to run the reservoir and collect states
     def run_reservoir(inputs: pd.DataFrame,
@@ -51,8 +52,7 @@ for run in range(n_runs):
                       period: int = 1):
         states = []
         for i, row in inputs.iterrows():
-
-            len_temps = len(row['Temps'])
+            len_temps = row['Temps'].size
 
             @ann.every(period=period)
             def set_inputs(n):
@@ -65,7 +65,7 @@ for run in range(n_runs):
             try:
                 ann.simulate(period * len_temps, callbacks=True)
             except:
-                print(row.index)
+                print(i, row['Temps'].size, row)
 
             if mean_pop is not None:
                 state = monitor.get(variables='r', keep=False)[-mean_pop:]
