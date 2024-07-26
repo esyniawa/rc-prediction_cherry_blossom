@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import os
 
+from network.reservoir import *
+from sakura_data import load_sakura_data
+
 
 def create_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFrame:
-    from network.reservoir import *
-    from sakura_data import load_sakura_data
-
     # Data from sakura dataset
     df = load_sakura_data().dropna()
 
