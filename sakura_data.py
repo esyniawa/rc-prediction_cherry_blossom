@@ -14,6 +14,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 
+
 def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
 
     # Function to flatten arrays or convert scalars to arrays
@@ -43,7 +44,7 @@ def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
 def create_sakura_data(first_season: int = 1956,
                        last_season: int = 2020,  # Extend this range if more data is available
                        scale_data: float | None = 1.,
-                       save_data: bool = True):
+                       file_path: str | None = 'data/training_data.parquet'):
 
     # Load datasets
     blossom_df = pd.read_csv('./data/sakura_full_bloom_dates.csv')
@@ -111,8 +112,8 @@ def create_sakura_data(first_season: int = 1956,
         for column in ['Temps', 'Mean_Temp', 'Lat', 'Lng']:
             result_df = scale_column(df=result_df, column_name=column, a=scale_data)
 
-    if save_data:
-        result_df.to_parquet('data/training_data.parquet', index=False)
+    if file_path is not None:
+        result_df.to_parquet(file_path, index=False)
 
     return result_df
 
@@ -121,7 +122,7 @@ def load_sakura_data(file_path: str = 'data/training_data.parquet'):
     if os.path.isfile(file_path):
         df = pd.read_parquet(file_path)
     else:
-        df = create_sakura_data()
+        df = create_sakura_data(file_path=file_path)
     return df
 
 
