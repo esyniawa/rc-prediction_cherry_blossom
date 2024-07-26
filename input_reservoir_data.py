@@ -14,7 +14,7 @@ def create_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFram
     # Create the dataframe
     lasso_df = pd.DataFrame()
     lasso_df['Output'] = df['Blossom']
-    lasso_df['Input'] = np.nan
+    lasso_df['Input'] = None
 
     # Create a monitor to record the evolution of firing rates during simulation
     monitor = ann.Monitor(reservoir_pop, 'r', period=1.0)
