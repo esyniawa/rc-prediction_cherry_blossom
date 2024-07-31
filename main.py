@@ -12,7 +12,7 @@ from sklearn.metrics import mean_squared_error
 from input_reservoir_data import load_input_data
 from network.reservoir import N
 
-n_runs = 20
+n_runs = 50
 do_plot = True
 
 # If figures need to be stored
@@ -29,11 +29,12 @@ df = load_input_data()
 
 # Scaling output data
 scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
-df['Output_scaled'] = scaler.fit_transform(df['Output'].values.reshape(-1, 1))
+Y = scaler.fit_transform(df['Output'].values.reshape(-1, 1))
+X = np.array(df['Input'].tolist())
 
 for run in range(n_runs):
     # Splitting the data
-    X_train, X_test, Y_train, Y_test = train_test_split(df['Input'], df['Output_scaled'], test_size=0.3, shuffle=True)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.3, shuffle=True)
 
     ######################################################## Training part ###########################################
     # Train output weights using Lasso regression
@@ -59,11 +60,14 @@ for run in range(n_runs):
         plt.plot(test, label='True', color='b')
         plt.plot(pred, label='Predicted', alpha=0.8, marker=".", markersize=2,
                  linestyle='None', color='r')
+        plt.plot(pred-test, label='Predicted', alpha=0.8, marker="x", markersize=2,
+                 linestyle='None', color='k')
+
         plt.legend()
         plt.title(f'Sakura Blossom Date Prediction N={N}')
         plt.savefig(f'figures/{run}', bbox_inches='tight')
         plt.close(fig)
 
-
 np.save('results.npy', np.array(results_mse))
 
+print(f'MSE = {np.mean(np.array(results_mse), axis=0)} +/- {np.std(np.array(results_mse), axis=0)}')

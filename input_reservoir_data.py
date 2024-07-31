@@ -7,7 +7,9 @@ from network.reservoir import *
 from sakura_data import load_sakura_data
 
 
-def create_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFrame:
+def create_input_data(file_path: str = 'data/lasso_data.parquet',
+                      mean_pop: int | None = None,
+                      period: int = 2) -> pd.DataFrame:
     # Data from sakura dataset
     df = load_sakura_data().dropna()
 
@@ -17,11 +19,11 @@ def create_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFram
     lasso_df['Input'] = None
 
     # Create a monitor to record the evolution of firing rates during simulation
-    monitor = ann.Monitor(reservoir_pop, 'r', period=1.0)
+    monitor = ann.Monitor(reservoir_pop, 'r', period=period)
 
     def run_reservoir(inputs: pd.DataFrame,
-                      mean_pop: int | None = 30,
-                      period: int = 1):
+                      mean_pop=mean_pop,
+                      period=period):
 
         for i, row in inputs.iterrows():
             len_temps = row['Temps'].size
@@ -52,7 +54,7 @@ def create_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFram
     ann.compile(clean=True)
 
     # Create input data
-    run_reservoir(df, mean_pop=20, period=1)
+    run_reservoir(df)
 
     # Save the dataframe
     lasso_df.to_parquet(file_path, index=False)

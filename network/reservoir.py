@@ -3,20 +3,20 @@ import ANNarchy as ann
 
 
 # Variable N ESN population
-N = 1000
+N = 1500
 con_prob = 0.2  # connection probability in reservoir
 
 ########################################################## ANNarchy/ESN ########################################################
 ann.clear()
 # step size 1 millisecond
-ann.setup(dt=1.0, num_threads=6)
+ann.setup(dt=1.0, num_threads=5)
 
 # The neuron has three parameters and two variables
 ESN_Neuron = ann.Neuron(
     parameters = """
-        tau = 10.0 : population
-        g = 1.2 : population
-        noise = 0.01 : population
+        tau = 5.0 : population
+        g = 1.5 : population
+        noise = 0.0 : population
     """,
     equations="""
         tau * dx/dt + x = sum(in) + g * sum(exc) + noise * Uniform(-1, 1)
