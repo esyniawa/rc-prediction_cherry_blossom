@@ -9,7 +9,7 @@ con_prob = 0.2  # connection probability in reservoir
 ########################################################## ANNarchy/ESN ########################################################
 ann.clear()
 # step size 1 millisecond
-ann.setup(dt=1.0, num_threads=5)
+ann.setup(dt=1.0, num_threads=4)
 
 # The neuron has three parameters and two variables
 ESN_Neuron = ann.Neuron(
