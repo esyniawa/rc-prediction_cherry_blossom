@@ -1,3 +1,5 @@
+import sys
+
 import ANNarchy as ann
 import pandas as pd
 import numpy as np
@@ -9,7 +11,10 @@ from sakura_data import load_sakura_data
 
 def create_input_data(file_path: str = 'data/lasso_data.parquet',
                       mean_pop: int | None = None,
-                      period: int = 2) -> pd.DataFrame:
+                      period: int = 1,
+                      tau: float = 10.,
+                      g: float = 1.) -> pd.DataFrame:
+
     # Data from sakura dataset
     df = load_sakura_data().dropna()
 
@@ -53,6 +58,10 @@ def create_input_data(file_path: str = 'data/lasso_data.parquet',
     # Compile network
     ann.compile(clean=True)
 
+    # set parameters
+    reservoir_pop.g = g
+    reservoir_pop.tau = tau
+
     # Create input data
     run_reservoir(df)
 
@@ -68,3 +77,11 @@ def load_input_data(file_path: str = 'data/lasso_data.parquet') -> pd.DataFrame:
     else:
         df = create_input_data(file_path=file_path)
     return df
+
+if __name__ == '__main__':
+
+    period, mean_pop = int(sys.argv[1]), int(sys.argv[2])
+
+    create_input_data(file_path=f'data/lasso_data_period{period}_mean{mean_pop}.parquet',
+                      mean_pop=mean_pop,
+                      period=period)

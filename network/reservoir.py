@@ -32,4 +32,4 @@ Wrec.connect_fixed_probability(probability=con_prob, weights=ann.Normal(mu=0, si
 
 # Output weights
 Wo = ann.Projection(reservoir_pop, output_pop, 'out')
-Wo.connect_all_to_all(weights=0.0)
+Wo.connect_all_to_all(weights=0.0, force_multiple_weights=True)

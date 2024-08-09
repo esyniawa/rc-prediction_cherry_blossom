@@ -20,12 +20,15 @@ def safe_save(save_name: str, array: np.ndarray) -> None:
         np.save(save_name + '.npy', array)
 
 
-def find_largest_factors(c: int):
-    """
-    Returns the two largest factors a and b of an integer c, such that a * b = c.
-    """
-    for a in range(int(c**0.5), 0, -1):
-        if c % a == 0:
-            b = c // a
-            return b, a
-    return 1, c
+def load_lasso_weights(
+        save_path: str,
+        n_runs: int):
+
+    ws = []
+    for run in range(n_runs):
+        folder = f'{save_path}/run_{run}/lasso_weights.npy'
+        w = np.load(folder)
+        ws.append(w)
+
+    ws = np.array(ws)
+    return np.mean(ws, axis=0), ws

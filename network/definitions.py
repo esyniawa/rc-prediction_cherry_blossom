@@ -3,7 +3,7 @@ import ANNarchy as ann
 # The neuron has three parameters and two variables
 ESN_Neuron = ann.Neuron(
     parameters = """
-        tau = 5.0 : population
+        tau = 10.0 : population
         g = 1.5 : population
         noise = 0.0 : population
     """,

@@ -4,6 +4,7 @@ import numpy as np
 import os
 from typing import Iterable
 
+
 def ceil(a: float, precision: int = 0):
     """
     Calculate the ceiling value of a number 'a' with a specified precision.
@@ -30,6 +31,7 @@ def find_largest_factors(c: int):
             b = c // a
             return b, a
     return 1, c
+
 
 def numpy_reshape(m: np.ndarray, dim: int = 2):
     """
@@ -207,6 +209,11 @@ class PopMonitor(object):
             if plot_type == 'Matrix':
                 if results[key].ndim > 4:
                     results[key] = PopMonitor._reshape(results[key])
+                elif results[key].ndim == 2:
+                    last_dim = results[key].shape[1]
+                    inner_rows, inner_cols = find_largest_factors(last_dim)
+                    results[key] = results[key].reshape(results[key].shape[0], inner_rows, inner_cols)
+
                 res_max = np.amax(abs(results[key]))
 
                 # subplots
@@ -252,12 +259,15 @@ class PopMonitor(object):
                         # set off tick labels for better arrangement
                         ax.set_xticks([])
                         ax.set_yticks([])
-                        ax.set_ylim([0, ceil(res_max + 0.1, precision=1)])
+                        ax.set_ylim([-ceil(res_max + 0.1, precision=1), ceil(res_max + 0.1, precision=1)])
 
                         plots.append(p)
                 else:
                     ax = subfig.subplots()
-                    plots = ax.plots(results[t_init])
+                    plots = ax.plot(results[key][t_init])
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.set_ylim([-ceil(res_max + 0.1, precision=1), ceil(res_max + 0.1, precision=1)])
                     ax.set_ylabel('Activity')
 
             elif plot_type == 'Bar':
@@ -277,7 +287,7 @@ class PopMonitor(object):
                         p = ax.bar(x=np.arange(1, result.shape[1] + 1, 1), height=result, width=0.5)
 
                         ax.set_ylabel('Activity')
-                        ax.set_ylim([0, ceil(res_max + 0.1, precision=1)])
+                        ax.set_ylim([-ceil(res_max + 0.1, precision=1), ceil(res_max + 0.1, precision=1)])
 
                         plots.append(p)
                 else:
@@ -285,7 +295,7 @@ class PopMonitor(object):
                     plots = ax.bar(x=np.arange(1, results[key].shape[1] + 1, 1), height=results[key][t_init], width=0.5)
 
                     ax.set_ylabel('Activity')
-                    ax.set_ylim([0, ceil(res_max + 0.1, precision=1)])
+                    ax.set_ylim([-ceil(res_max + 0.1, precision=1), ceil(res_max + 0.1, precision=1)])
 
             elif plot_type == 'Polar':
 
@@ -308,14 +318,14 @@ class PopMonitor(object):
                 if results[key].ndim > 2:
                     results[key] = PopMonitor._reshape(results[key], dim=3)
 
-                res_max = np.amax(results[key])
+                res_max = np.amax(np.abs(results[key]))
 
                 # plotting
                 ax.plot(results[key])
                 plots = ax.plot(results[key][t_init], marker='x', color='r')
                 ax.set_ylabel('Activity')
                 ax.set_xlabel('t', loc='right')
-                ax.set_ylim([0, ceil(res_max + 0.1, precision=1)])
+                ax.set_ylim([-ceil(res_max + 0.1, precision=1), ceil(res_max + 0.1, precision=1)])
 
             elif plot_type is None:
                 plots = None
@@ -356,6 +366,13 @@ class PopMonitor(object):
                         else:
                             subfigure.set_data(results[key][t])
 
+                    elif plt_type == 'Plot':
+                        if isinstance(subfigure, list):
+                            for plot, result in zip(subfigure, np.rollaxis(results[key], axis=-1)):
+                                plot.set_ydata(result[t])
+                        else:
+                            subfigure.set_ydata(results[key][t])
+
                     elif plt_type == 'Bar':
                         if isinstance(subfigure, list):
                             for plot, result in zip(subfigure, np.rollaxis(results[key], axis=-1)):
@@ -372,7 +389,7 @@ class PopMonitor(object):
 
                     elif plt_type == 'Line':
                         subfigure[0].set_ydata(results[key][t])
-                        subfigure[0].set_xdata(t)
+                        subfigure[0].set_xdata([t])
 
             time_slider.on_changed(update)
 
@@ -389,6 +406,13 @@ class PopMonitor(object):
                         else:
                             subfigure.set_data(results[key][t])
 
+                    elif plt_type == 'Plot':
+                        if isinstance(subfigure, list):
+                            for plot, result in zip(subfigure, np.rollaxis(results[key], axis=-1)):
+                                plot.set_ydata(result[t])
+                        else:
+                            subfigure.set_ydata(results[key][t])
+
                     elif plt_type == 'Bar':
                         if isinstance(subfigure, list):
                             for plot, result in zip(subfigure, np.rollaxis(results[key], axis=-1)):
@@ -405,7 +429,7 @@ class PopMonitor(object):
 
                     elif plt_type == 'Line':
                         subfigure[0].set_ydata(results[key][t])
-                        subfigure[0].set_xdata(t)
+                        subfigure[0].set_xdata([t])
 
             # make folder if not exists
             folder, _ = os.path.split(save_name)
@@ -425,12 +449,14 @@ class PopMonitor(object):
     @staticmethod
     def load_and_animate(folder: str,
                          pops: list[str] | tuple[str],
-                         plot_types: list[str] | tuple[str] | str = None):
+                         plot_types: list[str] | tuple[str] | str = None,
+                         save_name: str | None = None):
+
         import glob
         # Assignment of the populations to the files
         file_list = []
         for pop in pops:
-            file_list += [file for file in glob.glob(folder + '*.npy') if pop in file]
+            file_list += [file for file in glob.glob(folder + 'r*.npy') if pop in file]
 
         # Load data
         results = {}
@@ -442,7 +468,8 @@ class PopMonitor(object):
             plot_types = 'Bar'
 
         PopMonitor.animate_rates(results=results,
-                                 plot_types=plot_types)
+                                 plot_types=plot_types,
+                                 save_name=save_name)
 
 
 class ConMonitor(object):
@@ -561,10 +588,7 @@ class ConMonitor(object):
                 # imshow
                 ax = subfig.subplots()
                 ax.imshow(result, cmap='RdBu', origin='lower', interpolation='none')
-            else:
-                if result.ndim > 3:
-                    result = numpy_reshape(result, dim=3)
-
+            elif result.ndim == 3:
                 sub_rows, sub_cols = find_largest_factors(result.shape[0])
                 axs = subfig.subplots(nrows=sub_rows, ncols=sub_cols)
 
@@ -572,6 +596,20 @@ class ConMonitor(object):
                     ax.imshow(result[inner_i], cmap='RdBu', origin='lower', interpolation='none',
                               vmax=np.amax(result), vmin=np.amin(result))
                     ax.tick_params(axis="both", labelsize=4 + 24/result.shape[0])
+            else:
+                if result.ndim > 4:
+                    result = numpy_reshape(result, dim=4)
+
+                dim1 = result.shape[0]
+                dim2 = result.shape[1]
+
+                sub_rows, sub_cols = find_largest_factors(dim1 * dim2)
+                axs = subfig.subplots(nrows=sub_rows, ncols=sub_cols)
+
+                for inner_i, ax in enumerate(axs.flat):
+                    ax.imshow(result[int(inner_i%dim1), int(inner_i%dim2)], cmap='RdBu', origin='lower', interpolation='none',
+                              vmax=np.amax(result), vmin=np.amin(result))
+                    ax.tick_params(axis="both", labelsize=4 + 24 / result.shape[0])
 
         if save_name is None:
             plt.show()
@@ -582,3 +620,33 @@ class ConMonitor(object):
 
             plt.savefig(save_name)
             plt.close(fig)
+
+    @staticmethod
+    def load_and_plot_wdiff(folder: str,
+                            cons: list[str] | tuple[str],
+                            fig_size: tuple[float, float] | None = None,
+                            save_name: str | None = None):
+
+        import glob
+        # Assignment of the populations to the files
+        file_list = []
+        for con in cons:
+            file_list += [file for file in glob.glob(folder + '*.npy') if con in file]
+
+        # Load data
+        for file in file_list:
+            results = {}
+
+            _, name = os.path.split(file)
+            results[name[:-4]] = np.load(file)
+
+            if save_name is not None:
+                save_name += '_' + name[:-4]
+
+            if fig_size is None:
+                fig_size = find_largest_factors(np.prod(results[name[:-4]].shape[0:1]))
+                fig_size = np.array(fig_size) * 10
+
+            ConMonitor.weight_difference(monitors=results,
+                                         fig_size=fig_size,
+                                         save_name=save_name)

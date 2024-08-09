@@ -12,9 +12,9 @@ from sklearn.metrics import mean_squared_error
 from input_dynamic_data import load_input_data
 from network.reservoir import N
 
-from utils import safe_save, find_largest_factors
+from utils import safe_save
 
-n_runs = 20
+n_runs = 50
 do_plot = True
 
 ###################################################### Data ##############################################################

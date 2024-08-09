@@ -1,19 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-n_runs = 20
+from utils import load_lasso_weights
 
-ws = []
+n_runs = 50
+mean, ws = load_lasso_weights(save_path='lasso_data', n_runs=n_runs)
 
-for run in range(n_runs):
-    save_path = f'lasso_data/run_{run}/lasso_weights.npy'
-    w = np.load(save_path)
-    ws.append(w)
-
-ws = np.array(ws)
-mean = ws.mean(axis=0)
 ws[ws == 0] = np.nan
-mean[mean == 0] = np.nan
+mean[mean == 0.] = np.nan
 
 # plot average weights with error bars
 fig = plt.figure(figsize=(20, 10))
