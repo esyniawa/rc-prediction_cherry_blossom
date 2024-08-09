@@ -9,19 +9,13 @@ from sklearn import linear_model
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 
-from input_reservoir_data import load_input_data
+from input_dynamic_data import load_input_data
 from network.reservoir import N
 
-n_runs = 50
+from utils import safe_save, find_largest_factors
+
+n_runs = 20
 do_plot = True
-
-# If figures need to be stored
-if do_plot and not os.path.exists('figures'):
-    os.mkdir('figures')
-    print('New directory for the figures created!')
-
-
-results_mse = []
 
 ###################################################### Data ##############################################################
 # load training data
@@ -32,7 +26,11 @@ scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
 Y = scaler.fit_transform(df['Output'].values.reshape(-1, 1))
 X = np.array(df['Input'].tolist())
 
+mse = []
+
 for run in range(n_runs):
+    save_path = f'lasso_data/run_{run}/'
+
     # Splitting the data
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.3, shuffle=True)
 
@@ -53,9 +51,14 @@ for run in range(n_runs):
     mse_unscaled = mean_squared_error(test, pred)
     # print(f'Mean Squared Error Converted: {mse}')
 
-    results_mse.append((mse_scaled, mse_unscaled))
+    # save
+    safe_save(save_path + 'lasso_weights.npy', lasso.coef_)
+    np.savetxt(save_path + 'lasso_mse.csv', np.array([mse_unscaled, mse_scaled]), delimiter=',')
+    mse.append([mse_unscaled, mse_scaled])
 
     if do_plot:
+
+        # Plot predictions and true values
         fig = plt.figure()
         plt.plot(test, label='True', color='b')
         plt.plot(pred, label='Predicted', alpha=0.8, marker=".", markersize=2,
@@ -65,9 +68,16 @@ for run in range(n_runs):
 
         plt.legend()
         plt.title(f'Sakura Blossom Date Prediction N={N}')
-        plt.savefig(f'figures/{run}', bbox_inches='tight')
+        plt.savefig(save_path + 'prediction.pdf', bbox_inches='tight')
         plt.close(fig)
 
-np.save('results.npy', np.array(results_mse))
+        # Plot output weights
+        w = lasso.coef_
+        fig = plt.figure()
+        plt.plot(w, linestyle=None, marker=".", markersize=2)
+        plt.title(f'Output Weights Lasso N={N}')
+        plt.savefig(save_path + 'weight_matrix.pdf', bbox_inches='tight')
+        plt.close(fig)
 
-print(f'MSE = {np.mean(np.array(results_mse), axis=0)} +/- {np.std(np.array(results_mse), axis=0)}')
+print(f'MSE_unscaled = {np.mean(np.array(mse), axis=0)[0]:.3f} +/- {np.std(np.array(mse), axis=0)[0]:.3f}')
+print(f'MSE_scaled = {np.mean(np.array(mse), axis=0)[1]:.3f} +/- {np.std(np.array(mse), axis=0)[1]:.3f}')

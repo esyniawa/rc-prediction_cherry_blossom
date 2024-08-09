@@ -3,6 +3,8 @@
 .idea/
 figures/
 *_backup*
+lasso_data/*
+*.parquet
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
