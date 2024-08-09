@@ -56,7 +56,7 @@ def create_input_data(file_path: str = 'data/lasso_data.parquet',
             ann.reset(monitors=True, populations=True)
 
     # Compile network
-    ann.compile('annarchy/mean_pop{mean_pop}_period{period}_g{g}_tau{tau}/', clean=True)
+    ann.compile(f'annarchy/mean_pop{mean_pop}_period{period}_g{g}_tau{tau}/', clean=True)
 
     # set parameters
     reservoir_pop.g = g
