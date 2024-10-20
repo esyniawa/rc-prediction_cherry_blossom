@@ -47,7 +47,8 @@ def create_sakura_data(first_season: int = 1956,
                        file_path: str | None = 'data/training_data.parquet'):
 
     # Load datasets
-    blossom_df = pd.read_csv('./data/sakura_full_bloom_dates.csv')
+    full_blossom_df = pd.read_csv('./data/sakura_full_bloom_dates.csv')
+    first_blossom_df = pd.read_csv('./data/sakura_first_bloom_dates.csv')
     temps_df = pd.read_csv('./data/Japanese_City_Temps.csv')
     city_df = pd.read_csv('./data/worldcities.csv')
 
@@ -55,7 +56,7 @@ def create_sakura_data(first_season: int = 1956,
     temps_df['Date'] = pd.to_datetime(temps_df['Date'])
 
     # Get the list of cities present in both datasets
-    blossom_cities = set(blossom_df['Site Name'])
+    blossom_cities = set(full_blossom_df['Site Name'])
     temp_cities = set(temps_df.columns) - {'Date'}  # Exclude the 'Date' column
     common_cities = list(blossom_cities.intersection(temp_cities))
 
@@ -82,6 +83,7 @@ def create_sakura_data(first_season: int = 1956,
                 start_date = pd.to_datetime(row[str(year - 1)])
                 end_date = pd.to_datetime(row[str(year)])
 
+                date_range = pd.date_range(start_date, end_date, freq='D')
                 temps = get_temps(city, start_date, end_date)
 
                 # just append if I have enough temperatures
@@ -93,7 +95,8 @@ def create_sakura_data(first_season: int = 1956,
                         'Season': year,
                         'Blossom': end_date.dayofyear,
                         'Mean_Temp': avg_temp,
-                        'Temps': np.array(temps)
+                        'Temps': np.array(temps),
+                        'Dates': np.array([d.dayofyear for d in date_range])
                     }
 
                     result_rows.append(new_row)

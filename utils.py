@@ -19,16 +19,3 @@ def safe_save(save_name: str, array: np.ndarray) -> None:
     else:
         np.save(save_name + '.npy', array)
 
-
-def load_lasso_weights(
-        save_path: str,
-        n_runs: int):
-
-    ws = []
-    for run in range(n_runs):
-        folder = f'{save_path}/run_{run}/lasso_weights.npy'
-        w = np.load(folder)
-        ws.append(w)
-
-    ws = np.array(ws)
-    return np.mean(ws, axis=0), ws
