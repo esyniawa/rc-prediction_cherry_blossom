@@ -19,3 +19,38 @@ def safe_save(save_name: str, array: np.ndarray) -> None:
     else:
         np.save(save_name + '.npy', array)
 
+
+def find_latest_date(df):
+    """
+    Find the latest date from all year columns in the dataset.
+    Excludes non-date columns and converts dates to day of year for comparison.
+    """
+    import pandas as pd
+    from datetime import datetime
+
+    # Read all columns except the known non-date columns
+    exclude_cols = ['Site Name', 'Currently Being Observed', '30 Year Average 1981-2010', 'Notes']
+    date_cols = [col for col in df.columns if col not in exclude_cols]
+
+    # Convert all valid dates to datetime objects
+    latest_date = None
+    latest_day_of_year = 0
+
+    for col in date_cols:
+        # Skip empty columns or non-date columns
+        if df[col].empty or not isinstance(df[col].iloc[0], str):
+            continue
+
+        # Convert column to datetime
+        dates = pd.to_datetime(df[col], format='%Y-%m-%d', errors='coerce')
+
+        # Find the latest date based on day of year
+        for date in dates:
+            if pd.notna(date):
+                day_of_year = date.timetuple().tm_yday
+                if day_of_year > latest_day_of_year:
+                    latest_day_of_year = day_of_year
+                    latest_date = date
+
+    return latest_date, latest_day_of_year
+

@@ -43,6 +43,7 @@ def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
 
 def create_sakura_data(first_season: int = 1956,
                        last_season: int = 2020,  # Extend this range if more data is available
+                       start_date: int | None = 180,  # Begin of Temperature data in day of the year
                        scale_data: float | None = 1.,
                        file_path: str | None = 'data/training_data.parquet'):
 
