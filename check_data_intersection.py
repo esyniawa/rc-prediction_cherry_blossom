@@ -58,22 +58,3 @@ overlap_counts = {
     'Sakura First vs World Cities': len(sakura_first_cities.intersection(world_cities)),
     'Sakura Full vs World Cities': len(sakura_full_cities.intersection(world_cities))
 }
-
-# Get unique cities from both datasets
-temp_cities = set(temp_df.columns.tolist()[1:])  # Exclude 'Date' column
-blossom_cities = set(sakura_first_df['Site Name'].unique())
-
-# Find cities present in blossom data but missing in temperature data
-missing_cities = blossom_cities - temp_cities
-
-# Find matching cities
-matching_cities = blossom_cities.intersection(temp_cities)
-
-print("Cities in blossom data missing from temperature data:")
-for city in sorted(missing_cities):
-    print(f"- {city}")
-
-print("\nNumber of matching cities:", len(matching_cities))
-print("\nMatching cities:")
-for city in sorted(matching_cities):
-    print(f"- {city}")
