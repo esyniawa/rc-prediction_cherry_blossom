@@ -112,22 +112,23 @@ def process_data(temp_df: pd.DataFrame,
         suffixes=('_first', '_full')
     )
 
-    print(bloom_data['Year'].unique())
+    # Convert temps_df date column to datetime
+    temp_df['Date'] = pd.to_datetime(temp_df['Date'])
 
     def get_temp_sequence(row, temp_df, start_date, end_date):
-        #TODO: Check if previous year exists in temp_df
-        # Create date range
-        date_range = pd.date_range(start_date, end_date)
+        # Convert start_date and end_date to pandas Timestamp
+        start_date = pd.Timestamp(start_date)
+        end_date = pd.Timestamp(end_date)
 
-        # Get temperatures for the city
-        temps = []
-        for date in date_range:
-            temp = temp_df.loc[date, row['Site Name']] if date in temp_df.index else np.nan
-            print(temp, date, row['Site Name'])
-            temps.append(float(temp[0]) if len(temp) > 0 else np.nan)
+        # Create a mask to filter the DataFrame
+        mask = (temp_df['Date'] >= start_date) & (temp_df['Date'] <= end_date)
+
+        # Get temperatures for the city using the mask
+        temps = temp_df.loc[mask, row['Site Name']].tolist()
 
         # Interpolate missing values
         temps = pd.Series(temps).interpolate(method='linear').tolist()
+        print(len(temps))
         return temps
 
     def process_city_data(group):
@@ -140,6 +141,15 @@ def process_data(temp_df: pd.DataFrame,
 
             # Calculate start date (previous year)
             start_date = datetime(year - 1, start_month, start_day)
+
+            # debug ...
+            print(f"Start Date: {start_date}")
+            print(f"First Bloom Date: {first_date}")
+            print(f"Full Bloom Date: {full_date}")
+            print(f"temp_df shape: {temp_df.shape}")
+            print(f"temp_df columns: {temp_df.columns}")
+            print(f"temp_df Date range: {temp_df['Date'].min()} - {temp_df['Date'].max()}")
+
 
             # Get temperature sequences
             #TODO: This function returns only empty lists
@@ -169,7 +179,7 @@ def process_data(temp_df: pd.DataFrame,
     final_data = pd.DataFrame()
     for city, group in bloom_data.groupby('Site Name'):
         if city in temp_cities:
-            print(f"\tProcessing {city}")
+            print(f"\tProcessing {city}, Year: {group['Year'].values}")
             city_data = process_city_data(group)
             final_data = pd.concat([final_data, city_data])
         else:
