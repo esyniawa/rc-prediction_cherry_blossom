@@ -5,6 +5,7 @@ figures/
 *_backup*
 lasso_data/*
 *.parquet
+test_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
