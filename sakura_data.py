@@ -24,32 +24,37 @@ def parse_date(date_str: str, separator: str = ':'):
 
 def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
     """
-    Function to scale a column of a dataframe weather it is a scalar or an array
-    :param df: Dataframe
-    :param column_name: Column name to scale
-    :param a: Min and max value after the scaling
-    :return: Scaled dataframe
+    Enhanced function to scale a column containing either scalar values or lists
+
+    :param df: DataFrame containing the column to scale
+    :param column_name: Name of the column to scale
+    :param a: Range for scaling (-a to a)
+    :return: Scaled DataFrame and fitted scaler
     """
-    # Function to flatten arrays or convert scalars to arrays
-    def process_element(x):
-        return np.atleast_1d(x).flatten()
+    # Check if the column contains lists/arrays
+    is_list_column = isinstance(df[column_name].iloc[0], (list, np.ndarray))
 
-    # Process and flatten all elements in the column
-    flattened = np.concatenate(df[column_name].apply(process_element))
+    if is_list_column:
+        # Concatenate all arrays in the column
+        all_values = np.concatenate([np.array(x).flatten() for x in df[column_name] if len(x) > 0])
 
-    # Create and fit the MinMaxScaler
-    scaler = MinMaxScaler(feature_range=(-a, a))
-    scaler.fit(flattened.reshape(-1, 1))
+        # Create and fit scaler
+        scaler = MinMaxScaler(feature_range=(-a, a))
+        scaler.fit(all_values.reshape(-1, 1))
 
-    # Define a function to scale individual elements
-    def scale_element(x):
-        if np.isscalar(x):
-            return scaler.transform([[x]])[0][0]
-        else:
-            return scaler.transform(x.reshape(-1, 1)).flatten()
+        # Function to scale lists/arrays
+        def scale_list(x):
+            if len(x) == 0:
+                return x
+            return scaler.transform(np.array(x).reshape(-1, 1)).flatten().tolist()
 
-    # Apply the scaling function to each element in the column
-    df[column_name] = df[column_name].apply(scale_element)
+        # Apply scaling to each list in the column
+        df[column_name] = df[column_name].apply(scale_list)
+
+    else:
+        # Original scalar scaling logic
+        scaler = MinMaxScaler(feature_range=(-a, a))
+        df[column_name] = scaler.fit_transform(df[column_name].values.reshape(-1, 1))
 
     return df, scaler
 
@@ -59,7 +64,8 @@ def process_data(temp_df: pd.DataFrame,
                  full_bloom_df: pd.DataFrame,
                  cities_df: pd.DataFrame,
                  start_month: int = 7,
-                 start_day: int = 1) -> pd.DataFrame:
+                 start_day: int = 1,
+                 drop_inadequate_temps: bool = True) -> pd.DataFrame:
     """
     Function to merge the different datasets
 
@@ -101,8 +107,8 @@ def process_data(temp_df: pd.DataFrame,
     full_bloom_processed = extract_years_and_dates(full_bloom_df)
 
     # Simplify city names
-    first_bloom_processed['Site Name'] = first_bloom_df['Site Name'].replace('Tokyo Japan', 'Tokyo')
-    full_bloom_processed['Site Name'] = full_bloom_df['Site Name'].replace('Tokyo Japan', 'Tokyo')
+    # first_bloom_processed['Site Name'] = first_bloom_df['Site Name'].replace('Tokyo Japan', 'Tokyo')
+    # full_bloom_processed['Site Name'] = full_bloom_df['Site Name'].replace('Tokyo Japan', 'Tokyo')
 
     # Merge first and full bloom dates
     bloom_data = pd.merge(
@@ -128,8 +134,25 @@ def process_data(temp_df: pd.DataFrame,
 
         # Interpolate missing values
         temps = pd.Series(temps).interpolate(method='linear').tolist()
-        print(len(temps))
+
         return temps
+
+    def validate_temperature_data(row: pd.Series):
+        """
+        Temperature lists should have the same length as days_to_first_bloom and days_to_full_bloom (missing values in
+        the temperature set are interpolated)
+        """
+        expected_length_first = row['days_to_first'] + 1 if pd.notna(row['days_to_first']) else 0
+        expected_length_full = row['days_to_full'] + 1 if pd.notna(row['days_to_full']) else 0
+
+        # Check if temperature lists exist and have correct lengths
+        temps_first_valid = (
+                    len(row['temps_to_first']) == expected_length_first) if expected_length_first > 0 else False
+        temps_full_valid = (
+                    len(row['temps_to_full']) == expected_length_full) if expected_length_full > 0 else False
+
+        # Both lists should be non-empty and have correct lengths
+        return temps_first_valid and temps_full_valid
 
     def process_city_data(group):
         results = []
@@ -142,17 +165,7 @@ def process_data(temp_df: pd.DataFrame,
             # Calculate start date (previous year)
             start_date = datetime(year - 1, start_month, start_day)
 
-            # debug ...
-            print(f"Start Date: {start_date}")
-            print(f"First Bloom Date: {first_date}")
-            print(f"Full Bloom Date: {full_date}")
-            print(f"temp_df shape: {temp_df.shape}")
-            print(f"temp_df columns: {temp_df.columns}")
-            print(f"temp_df Date range: {temp_df['Date'].min()} - {temp_df['Date'].max()}")
-
-
             # Get temperature sequences
-            #TODO: This function returns only empty lists
             temps_to_first = get_temp_sequence(row, temp_df, start_date, first_date)
             temps_to_full = get_temp_sequence(row, temp_df, start_date, full_date)
 
@@ -179,11 +192,16 @@ def process_data(temp_df: pd.DataFrame,
     final_data = pd.DataFrame()
     for city, group in bloom_data.groupby('Site Name'):
         if city in temp_cities:
-            print(f"\tProcessing {city}, Year: {group['Year'].values}")
+            print(f"\tProcessing {city}")
             city_data = process_city_data(group)
             final_data = pd.concat([final_data, city_data])
         else:
             print(f"\tSkipping {city}")
+
+    # Remove rows with invalid temperature data
+    if drop_inadequate_temps:
+        valid_rows = final_data.apply(validate_temperature_data, axis=1)
+        final_data = final_data[valid_rows].reset_index(drop=True)
 
     # Merge with city coordinates
     print("Merge all data...")
@@ -233,7 +251,7 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
 
-        with open(folder + 'scalers.pickle', 'w') as f:
+        with open(folder + '/scalers.pickle', 'wb') as f:
             pickle.dump(scalers, f)
 
         result_df.to_parquet(file_path, index=False)
@@ -244,7 +262,7 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
 def load_sakura_data(file_path: str = 'src_training/training_data.parquet') -> (pd.DataFrame, dict):
     if os.path.isfile(file_path):
         df = pd.read_parquet(file_path)
-        with open(os.path.split(file_path)[0] + 'scalers.pickle', 'r') as f:
+        with open(os.path.split(file_path)[0] + '/scalers.pickle', 'rb') as f:
             scalers = pickle.load(f)
     else:
         df, scalers = create_sakura_data(start_date="01:07", file_path=file_path)
@@ -257,4 +275,4 @@ if __name__ == '__main__':
     print(df.head())
     print(df.shape)
 
-    print(np.amin(df['Lat'].values))
+    print(np.amin(df['lat'].values))
