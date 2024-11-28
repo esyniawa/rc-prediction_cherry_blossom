@@ -3,7 +3,6 @@
 # See comments below for more information.
 import os.path
 import pickle
-from calendar import month
 
 # Datasets are downloaded from Kaggle:
 # https://www.kaggle.com/datasets/ryanglasnapp/japanese-cherry-blossom-data,
@@ -217,7 +216,7 @@ def process_data(temp_df: pd.DataFrame,
 
 
 def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
-                       drop_na: bool = True,
+                       drop_na: bool = False,
                        scale_data: float | None = 1.,
                        file_path: str | None = 'src_training/training_data.parquet') -> (pd.DataFrame, dict):
 
