@@ -20,7 +20,7 @@ class Reservoir(nn.Module):
                  feedback_scaling: float = 1.0,
                  noise_scaling: float = 0.0,
                  seed: Optional[int] = None,
-                 device='cuda' if torch.cuda.is_available() else 'cpu'):
+                 device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         super().__init__()
         # Set random seed
         if seed is not None:
@@ -189,7 +189,7 @@ def test_reservoir(seed: Optional[int] = None):
     print(f"Using device: {device}")
 
     # Parameters
-    reservoir_size = 1_000
+    reservoir_size = 500
     dt = 0.1
     dim_input = 3
     target_signal, period = make_dynamic_target(dim_input, n_periods=10, seed=seed)
@@ -213,15 +213,15 @@ def test_reservoir(seed: Optional[int] = None):
 
     # Training parameters
     n_steps = len(target_signal)
-    plot_interval = period  # Update plot every period
+    plot_interval = 100  # Update plot every 100 steps
     error_history = []
+    output_history = []
 
     # Create figure for live plotting
     plt.ion()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
     lines_target = []
     lines_output = []
-    line_error = None
 
     # Initialize plot lines
     for i in range(dim_input):
@@ -235,16 +235,19 @@ def test_reservoir(seed: Optional[int] = None):
     ax1.set_title('Target vs Output')
     ax1.legend()
 
-    line_error, = ax2.plot([], [], label='Mean squared error')
+    error_line, = ax2.plot([], [], label='Mean squared error')
     ax2.set_xlabel('Time steps')
     ax2.set_ylabel('MSE')
     ax2.set_title('Training Error')
     ax2.set_yscale('log')
     ax2.legend()
 
+    # Set initial y-limits for error plot (positive log scale)
+    ax2.set_ylim(1e-6, 1)
+
     # Training loop
     print("Starting training...")
-    running_window = period  # Window size for error calculation
+    running_window = 20  # Window size for error calculation
 
     try:
         for step in range(n_steps):
@@ -259,44 +262,51 @@ def test_reservoir(seed: Optional[int] = None):
                 dt=dt
             )
 
-            # Calculate error
-            mse = torch.mean(error_minus ** 2).item()
+            # Store output
+            output_history.append(reservoir.output.cpu().detach().numpy())
+
+            # Calculate error (ensure it's positive for log scale)
+            mse = max(1e-10, torch.mean(error_minus ** 2).item())  # Set minimum value to avoid log(0)
             error_history.append(mse)
 
-            # Update plot every period
+            # Update plot periodically
             if (step + 1) % plot_interval == 0:
-                plot_window = slice(max(0, step - running_window), step + 1)
-                time_window = np.arange(plot_window.start, plot_window.stop)
+                # Convert output history to numpy array for plotting
+                outputs = np.array(output_history)
+
+                # Update time window for plotting
+                time_indices = np.arange(len(output_history))
 
                 # Update signals plot
                 for i in range(dim_input):
-                    lines_target[i].set_data(
-                        time_window,
-                        target_signal[plot_window, i].cpu()
-                    )
-                    lines_output[i].set_data(
-                        time_window,
-                        reservoir.output.cpu().detach().numpy() if i == 0
-                        else target_signal[plot_window, i].cpu()
-                    )
+                    target_data = target_signal[:len(time_indices), i].cpu().numpy()
+                    output_data = outputs[:, i]
+
+                    lines_target[i].set_data(time_indices, target_data)
+                    lines_output[i].set_data(time_indices, output_data)
 
                 # Update error plot
-                line_error.set_data(
-                    np.arange(len(error_history)),
-                    error_history
-                )
+                error_line.set_data(time_indices, error_history)
 
                 # Adjust plot limits
-                for ax in [ax1, ax2]:
-                    ax.relim()
-                    ax.autoscale_view()
+                ax1.set_xlim(max(0, len(output_history) - running_window), len(output_history))
+                ax1.set_ylim(min(target_signal.cpu().numpy().min(), outputs.min()) - 0.1,
+                             max(target_signal.cpu().numpy().max(), outputs.max()) + 0.1)
+
+                # Update error plot limits (ensure they're positive for log scale)
+                if len(error_history) > 0:
+                    min_error = max(1e-10, min(error_history))
+                    max_error = max(error_history)
+                    ax2.set_ylim(min_error / 10, max_error * 10)  # Add some padding in log space
+
+                ax2.set_xlim(0, len(error_history))
 
                 # Draw updated plots
                 fig.canvas.draw()
                 fig.canvas.flush_events()
 
                 # Print progress
-                print(f"Step {step + 1}/{n_steps}, MSE: {mse:.6f}")
+                print(f"Step {step + 1}/{n_steps}, MSE: {mse:.6e}")
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
@@ -305,7 +315,7 @@ def test_reservoir(seed: Optional[int] = None):
 
     # Final evaluation
     print("\nTraining completed!")
-    print(f"Final MSE: {mse:.6f}")
+    print(f"Final MSE: {mse:.6e}")
 
     # Show final plot
     plt.show()
