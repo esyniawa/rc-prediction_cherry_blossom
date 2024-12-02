@@ -8,6 +8,7 @@ from typing import Tuple, List, Optional
 import os
 import json
 
+
 class SakuraReservoir:
     def __init__(self,
                  reservoir_size: int = 1000,
@@ -133,6 +134,8 @@ class SakuraReservoir:
         :return: predictions_df: DataFrame containing predictions and metadata
                  metrics: Dictionary containing overall error metrics
         """
+        assert 0.0 <= sequence_offset <= 1.0, "sequence offset is a fraction between 0.0 and 1.0!"
+
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
         total_mse = 0.0
@@ -247,6 +250,9 @@ def main(save_data_path: str,
          do_plot: bool = True,
          seed: Optional[int] = None):
 
+    if do_plot:
+        from utils import plot_mae_results
+
     if save_data_path[-1] != '/':
         save_data_path += '/'
 
@@ -292,7 +298,7 @@ def main(save_data_path: str,
             json.dump(metrics, f)
 
         if do_plot:
-            pass
+            plot_mae_results(predictions_df=predictions_df, save_path=folder + 'mae')
 
 
 if __name__ == "__main__":

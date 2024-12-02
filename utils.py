@@ -1,5 +1,9 @@
 import numpy as np
 import os
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
+from typing import Optional
 
 
 def safe_save(save_name: str, array: np.ndarray) -> None:
@@ -54,3 +58,106 @@ def find_latest_date(df):
 
     return latest_date, latest_day_of_year
 
+
+def plot_mae_results(predictions_df: pd.DataFrame, save_path: Optional[str] = None):
+    """
+    Create bar and line plots of MAE by site and year
+    """
+    # Set style
+    plt.style.use('seaborn')
+
+    # Create site plot
+    fig_site, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+
+    # Get unique sites
+    sites = sorted(predictions_df['site_name'].unique())
+    x = np.arange(len(sites))
+    width = 0.35
+
+    # Calculate site statistics
+    site_stats = predictions_df.groupby('site_name').agg({
+        'mae_first': ['mean', 'std', 'count'],
+        'mae_full': ['mean', 'std', 'count']
+    })
+
+    # Calculate standard errors
+    site_stats['mae_first', 'sem'] = site_stats['mae_first', 'std'] / np.sqrt(site_stats['mae_first', 'count'])
+    site_stats['mae_full', 'sem'] = site_stats['mae_full', 'std'] / np.sqrt(site_stats['mae_full', 'count'])
+
+    # Plot first bloom MAE by site
+    ax1.bar(x, site_stats['mae_first', 'mean'], width,
+            yerr=site_stats['mae_first', 'sem'],
+            capsize=5)
+    ax1.set_ylabel('MAE (days)')
+    ax1.set_title('First Bloom Prediction Error by Site')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(sites, rotation=45, ha='right')
+
+    # Plot full bloom MAE by site
+    ax2.bar(x, site_stats['mae_full', 'mean'], width,
+            yerr=site_stats['mae_full', 'sem'],
+            capsize=5)
+    ax2.set_ylabel('MAE (days)')
+    ax2.set_title('Full Bloom Prediction Error by Site')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(sites, rotation=45, ha='right')
+
+    plt.tight_layout()
+
+    # Save site plot if path provided
+    if save_path:
+        site_path = save_path + '_sites.pdf'
+        fig_site.savefig(site_path, bbox_inches='tight', dpi=300)
+    else:
+        plt.show()
+
+    # Create year plot
+    fig_year, (ax3, ax4) = plt.subplots(2, 1, figsize=(12, 10))
+
+    # Calculate year statistics
+    year_stats = predictions_df.groupby('year').agg({
+        'mae_first': ['mean', 'std', 'count'],
+        'mae_full': ['mean', 'std', 'count']
+    })
+
+    # Calculate confidence intervals (95%)
+    year_stats['mae_first', 'ci'] = 1.96 * year_stats['mae_first', 'std'] / np.sqrt(year_stats['mae_first', 'count'])
+    year_stats['mae_full', 'ci'] = 1.96 * year_stats['mae_full', 'std'] / np.sqrt(year_stats['mae_full', 'count'])
+
+    years = sorted(predictions_df['year'].unique())
+
+    # Plot first bloom MAE by year
+    ax3.plot(years, year_stats['mae_first', 'mean'], 'b-', label='Mean MAE')
+    ax3.fill_between(years,
+                     year_stats['mae_first', 'mean'] - year_stats['mae_first', 'ci'],
+                     year_stats['mae_first', 'mean'] + year_stats['mae_first', 'ci'],
+                     alpha=0.2,
+                     label='95% CI')
+    ax3.set_xlabel('Year')
+    ax3.set_ylabel('MAE (days)')
+    ax3.set_title('First Bloom Prediction Error by Year')
+    ax3.legend()
+
+    # Plot full bloom MAE by year
+    ax4.plot(years, year_stats['mae_full', 'mean'], 'b-', label='Mean MAE')
+    ax4.fill_between(years,
+                     year_stats['mae_full', 'mean'] - year_stats['mae_full', 'ci'],
+                     year_stats['mae_full', 'mean'] + year_stats['mae_full', 'ci'],
+                     alpha=0.2,
+                     label='95% CI')
+    ax4.set_xlabel('Year')
+    ax4.set_ylabel('MAE (days)')
+    ax4.set_title('Full Bloom Prediction Error by Year')
+    ax4.legend()
+
+    plt.tight_layout()
+
+    # Save year plot if path provided
+    if save_path:
+        year_path = save_path + '_years.pdf'
+        fig_year.savefig(year_path, bbox_inches='tight', dpi=300)
+    else:
+        plt.show()
+
+    plt.close('all')
+    
