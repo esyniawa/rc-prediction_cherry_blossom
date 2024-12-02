@@ -72,6 +72,7 @@ class Reservoir(nn.Module):
 
         return W
 
+    @torch.no_grad()
     def forward(self, input_signal, dt: float = 0.1):
         # Ensure input is on correct device and properly shaped
         input_signal = input_signal.to(self.device).view(self.dim_input)
@@ -91,6 +92,7 @@ class Reservoir(nn.Module):
 
         return self.output
 
+    @torch.no_grad()
     def step(self):
         return torch.matmul(self.W_out, self.r)
 
@@ -114,9 +116,9 @@ class ForceTrainer:
                  reservoir: Reservoir,
                  alpha: float = 1.0):
         self.reservoir = reservoir
-        self.alpha = alpha  # for init of P
         self.P = torch.eye(reservoir.dim_reservoir).to(reservoir.device) / alpha
 
+    @torch.no_grad()
     def train_step(self,
                    input_signal: torch.Tensor | np.ndarray,
                    target: torch.Tensor | np.ndarray,
