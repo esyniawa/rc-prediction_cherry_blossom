@@ -62,7 +62,7 @@ def process_data(temp_df: pd.DataFrame,
                  first_bloom_df: pd.DataFrame,
                  full_bloom_df: pd.DataFrame,
                  cities_df: pd.DataFrame,
-                 start_month: int = 7,
+                 start_month: int = 8,
                  start_day: int = 1,
                  drop_inadequate_temps: bool = True) -> pd.DataFrame:
     """
@@ -172,13 +172,27 @@ def process_data(temp_df: pd.DataFrame,
             days_to_first = (first_date - start_date).days
             days_to_full = (full_date - start_date).days
 
+            # Calculate the offset between first and full bloom
+            bloom_offset = days_to_full - days_to_first
+
+            # Create countdown sequences
+            # countdown_to_first continues to negative values until reaching the full bloom date
+            countdown_to_first = list(
+                range(days_to_first, days_to_first - bloom_offset - 1, -1))  # [days_to_first, ..., -bloom_offset]
+            countdown_to_full = list(
+                range(days_to_full, -1, -1))  # [days_to_full, ..., 0]
+
             results.append({
                 'site_name': row['Site Name'],
                 'year': year,
                 'first_bloom': first_date,
                 'full_bloom': full_date,
+                'data_start_date': start_date,
                 'days_to_first': days_to_first,
                 'days_to_full': days_to_full,
+                'bloom_offset': bloom_offset,
+                'countdown_to_first': countdown_to_first,
+                'countdown_to_full': countdown_to_full,
                 'temps_to_first': temps_to_first,
                 'temps_to_full': temps_to_full
             })
@@ -186,7 +200,7 @@ def process_data(temp_df: pd.DataFrame,
         return pd.DataFrame(results)
 
     # Process each city
-    print("Get input and output data...")
+    print("Get input and output data for reservoir...")
     temp_cities = set(temp_df.columns[1:])
     final_data = pd.DataFrame()
     for city, group in bloom_data.groupby('Site Name'):
@@ -241,7 +255,7 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
 
     scalers = {}
     if scale_data is not None:
-        for column in ['days_to_first', 'days_to_full', 'temps_to_first', 'temps_to_full', 'lat', 'lng']:
+        for column in ['countdown_to_first', 'countdown_to_full', 'temps_to_first', 'temps_to_full', 'lat', 'lng']:
             result_df, scalers[column] = scale_column(df=result_df, column_name=column, a=scale_data)
 
     print('Saving data...')
@@ -249,22 +263,24 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
         folder, _ = os.path.split(file_path)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
-
+        # save scalers
         with open(folder + '/scalers.pickle', 'wb') as f:
             pickle.dump(scalers, f)
-
+        # save dataframe
         result_df.to_parquet(file_path, index=False)
 
     return result_df, scalers
 
 
 def load_sakura_data(file_path: str = 'src_training/training_data.parquet') -> (pd.DataFrame, dict):
+    # if parquet file exists load it ...
     if os.path.isfile(file_path):
         df = pd.read_parquet(file_path)
         with open(os.path.split(file_path)[0] + '/scalers.pickle', 'rb') as f:
             scalers = pickle.load(f)
+    # ... otherwise create it
     else:
-        df, scalers = create_sakura_data(start_date="01:07", file_path=file_path)
+        df, scalers = create_sakura_data(start_date="01:08", file_path=file_path)
     return df, scalers
 
 
