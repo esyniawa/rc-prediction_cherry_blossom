@@ -122,7 +122,7 @@ class SakuraReservoir:
 
             if train_idx % 10 == 0:
                 mse = torch.mean(error_minus ** 2).item()
-                print(f"Sequence {train_idx}, MSE: {mse:.6e}")
+                print(f"Sequence {train_idx}, Error: {error_minus}, MSE: {mse:.6e}")
 
     def test(self, dt: float = 0.1, sequence_offset: float = 1.0):
         """
@@ -164,15 +164,15 @@ class SakuraReservoir:
                 seq_predictions.append(output.cpu().detach().numpy())
 
             # Convert predictions to numpy array
-            pred_tensor = torch.tensor(seq_predictions)
+            pred_tensor = np.array(seq_predictions)
 
             # Unscale predictions and targets
             unscaled_pred_first = self._inverse_transform_predictions(
-                pred_tensor[:, 0].numpy(),
+                pred_tensor[:, 0],
                 self.scalers['countdown_to_first']
             )
             unscaled_pred_full = self._inverse_transform_predictions(
-                pred_tensor[:, 1].numpy(),
+                pred_tensor[:, 1],
                 self.scalers['countdown_to_full']
             )
 
@@ -186,13 +186,14 @@ class SakuraReservoir:
             )
 
             # Calculate errors
-            mse_first = np.mean((unscaled_pred_first - unscaled_true_first) ** 2)
-            mse_full = np.mean((unscaled_pred_full - unscaled_true_full) ** 2)
+            mse_first = np.mean((unscaled_pred_first[~np.isnan(unscaled_pred_first)] -
+                                 unscaled_true_first[~np.isnan(unscaled_pred_first)]) ** 2)
+            mse_full = np.mean((unscaled_pred_full[~np.isnan(unscaled_pred_full)] -
+                                unscaled_true_full[~np.isnan(unscaled_pred_full)]) ** 2)
             mae_first = np.mean(np.abs(unscaled_pred_first - unscaled_true_first))
             mae_full = np.mean(np.abs(unscaled_pred_full - unscaled_true_full))
 
             mse = (mse_first + mse_full) / 2
-            mae = (mae_first + mae_full) / 2
             total_mse += mse
 
             # Store results with metadata
@@ -228,9 +229,9 @@ class SakuraReservoir:
         print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
 
         metrics = {
-            'mse': avg_mse,
-            'mae_first': avg_mae_first,
-            'mae_full': avg_mae_full
+            'mse': float(avg_mse),
+            'mae_first': float(avg_mae_first),
+            'mae_full': float(avg_mae_full)
         }
 
         return predictions_df, metrics
