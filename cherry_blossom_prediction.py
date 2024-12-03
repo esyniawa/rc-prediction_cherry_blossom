@@ -1,12 +1,13 @@
 import torch
 import numpy as np
 import pandas as pd
+import os
+import json
 from network.reservoir_torch import Reservoir, ForceTrainer
 from sakura_data import load_sakura_data
 from sklearn.model_selection import train_test_split
 from typing import Tuple, List, Optional
-import os
-import json
+from tqdm import tqdm
 
 
 class SakuraReservoir:
@@ -102,9 +103,7 @@ class SakuraReservoir:
 
     def train(self, dt: float = 0.1):
         """Train the reservoir on the sakura dataset"""
-        print(f"Training on {len(self.train_indices)} sequences...")
-
-        for train_idx in self.train_indices:
+        for train_idx in tqdm(self.train_indices, desc="Training"):
             inputs, targets, seq_length = self._prepare_sequence(train_idx)
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
@@ -120,9 +119,7 @@ class SakuraReservoir:
                     dt=dt
                 )
 
-            if train_idx % 10 == 0:
-                mse = torch.mean(error_minus ** 2).item()
-                print(f"Sequence {train_idx}, Error: {error_minus}, MSE: {mse:.6e}")
+        print("Training complete!")
 
     def test(self, dt: float = 0.1, sequence_offset: float = 1.0):
         """
@@ -141,7 +138,7 @@ class SakuraReservoir:
         total_mse = 0.0
         predictions = []
 
-        for test_idx in self.test_indices:
+        for test_idx in tqdm(self.test_indices, desc="Testing"):
             # Get metadata for this sequence
             row = self.df.iloc[test_idx]
             site_name = row['site_name']
@@ -239,23 +236,45 @@ class SakuraReservoir:
     def save_model(self, save_path: str):
         self.reservoir.save(path=save_path)
 
+    def load_model(self, load_path: str):
+        self.reservoir.load_state_dict(torch.load(load_path))
+
+    @property
+    def parameters(self):
+        """Get network parameters as a dictionary"""
+        params = {}
+        for name, param in self.reservoir.named_parameters():
+            # Convert tensor to Python list/float
+            if param.dim() == 0:  # scalar parameter
+                params[name] = float(param.item())
+            else:  # tensor parameter
+                params[name] = param.detach().cpu().numpy().tolist()
+        return params
+
 
 def main(save_data_path: str,
          test_cutoff: list[float],
          dim_reservoir: int,
+         training_set_size: float = 0.8,
          dt: float = 0.1,
          chaos_factor: float = 1.5,
          alpha: float = 1.0,
          probability_recurrent_connection: float = 0.2,
+         noise_scaling: float = 0.025,
          save_model_path: Optional[str] = None,
          do_plot: bool = True,
          seed: Optional[int] = None):
 
+    assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
+
     if do_plot:
         from utils import plot_mae_results
 
+    # create save path
     if save_data_path[-1] != '/':
         save_data_path += '/'
+    if not os.path.exists(save_data_path):
+        os.makedirs(save_data_path)
 
     # Set random seed for reproducibility
     if seed is not None:
@@ -267,7 +286,8 @@ def main(save_data_path: str,
         reservoir_size=dim_reservoir,
         tau=10.0,
         chaos_factor=chaos_factor,
-        train_percentage=0.8,
+        train_percentage=training_set_size,
+        noise_scaling=noise_scaling,
         alpha_FORCE=alpha,
         probability_recurrent_connection=probability_recurrent_connection,
         seed=seed
@@ -279,11 +299,11 @@ def main(save_data_path: str,
     # Save model
     if save_model_path is not None:
         sakura_rc.save_model(save_path=save_model_path)
+    # save parameters
+    with open(save_data_path + 'parameters.json', 'w') as f:
+        json.dump(sakura_rc.parameters, f)
 
     # Test
-    if not os.path.exists(save_data_path):
-        os.makedirs(save_data_path)
-
     for cutoff in test_cutoff:
         predictions_df, metrics = sakura_rc.test(dt=dt, sequence_offset=cutoff)
 
@@ -303,8 +323,31 @@ def main(save_data_path: str,
 
 
 if __name__ == "__main__":
-    cutoffs = [0.5, 0.7, 0.75, 0.8, 0.85, 0.9, 0.925]
-    main(save_data_path='src_test',
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--sim_id', type=int, default=0)
+    parser.add_argument('--dim_reservoir', type=int, default=2_000)
+    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--prop_recurrent', type=float, default=0.2)
+    parser.add_argument('--alpha', type=float, default=1.0)
+    parser.add_argument('--chaos_factor', type=float, default=1.5)
+    parser.add_argument('--noise_scaling', type=float, default=0.02)
+
+    args = parser.parse_args()
+
+    # folder
+    save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
+    cutoffs = [0.5, 0.7, 0.75, 0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95, 0.975,]
+
+    # run model
+    main(save_data_path=save_data_path,
          test_cutoff=cutoffs,
-         dim_reservoir=2000,
-         seed=42)
+         dim_reservoir=args.dim_reservoir,
+         training_set_size=0.8,
+         dt=0.1,
+         chaos_factor=args.chaos_factor,
+         alpha=args.alpha,
+         probability_recurrent_connection=args.prop_recurrent,
+         noise_scaling=args.noise_scaling,
+         seed=args.seed)

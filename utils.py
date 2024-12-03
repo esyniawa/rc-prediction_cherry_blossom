@@ -61,7 +61,7 @@ def plot_mae_results(predictions_df: pd.DataFrame, save_path: Optional[str] = No
     Create bar and line plots of MAE by site and year
     """
     # Set style
-    plt.style.use('seaborn')
+    sns.set_theme()
 
     # Create site plot
     fig_site, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
