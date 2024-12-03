@@ -230,7 +230,7 @@ def process_data(temp_df: pd.DataFrame,
 
 
 def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
-                       drop_na: bool = False,
+                       drop_na: bool = True,
                        scale_data: float | None = 1.,
                        file_path: str | None = 'src_training/training_data.parquet') -> (pd.DataFrame, dict):
 
