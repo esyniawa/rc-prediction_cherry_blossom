@@ -20,6 +20,6 @@ python cherry_blossom_prediction.py --sim_id 4 --dim_reservoir 5000 --seed 42 --
 
 parallel_end_time=$(date +%s)
 parallel_duration=$((parallel_end_time - start_time))
-parallel_runtime=$(seconds_to_dhm $parallel_duration)
+parallel_runtime=$(format_time $parallel_duration)
 
 echo "Parallel run completed in $parallel_runtime"
