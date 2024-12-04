@@ -23,6 +23,8 @@ class SakuraReservoir:
                  load_pretrained_model: Optional[str] = None,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         """Initialize the Sakura Reservoir Computer"""
+        print(f"PyTorch version: {torch.__version__} | Using device: {device}")
+
         self.device = device
         self.train_percentage = train_percentage
         self.seed = seed
