@@ -265,7 +265,8 @@ def main(save_data_path: str,
          noise_scaling: float = 0.025,
          save_model_path: Optional[str] = None,
          do_plot: bool = True,
-         seed: Optional[int] = None):
+         seed: Optional[int] = None,
+         device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
 
     assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
 
@@ -292,7 +293,8 @@ def main(save_data_path: str,
         noise_scaling=noise_scaling,
         alpha_FORCE=alpha,
         probability_recurrent_connection=probability_recurrent_connection,
-        seed=seed
+        seed=seed,
+        device=device
     )
 
     # Train
@@ -335,6 +337,7 @@ if __name__ == "__main__":
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--chaos_factor', type=float, default=1.5)
     parser.add_argument('--noise_scaling', type=float, default=0.02)
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
 
@@ -352,4 +355,6 @@ if __name__ == "__main__":
          alpha=args.alpha,
          probability_recurrent_connection=args.prop_recurrent,
          noise_scaling=args.noise_scaling,
-         seed=args.seed)
+         seed=args.seed,
+         do_plot=True,
+         device=torch.device(args.device))
