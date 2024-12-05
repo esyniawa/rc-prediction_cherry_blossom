@@ -8,6 +8,7 @@ from sakura_data import load_sakura_data
 from sklearn.model_selection import train_test_split
 from typing import Tuple, List, Optional
 from tqdm import tqdm
+import datetime
 
 
 class SakuraReservoir:
@@ -137,14 +138,10 @@ class SakuraReservoir:
 
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
-        total_mse = 0.0
         predictions = []
-
         for test_idx in tqdm(self.test_indices, desc="Testing"):
             # Get metadata for this sequence
             row = self.df.iloc[test_idx]
-            site_name = row['site_name']
-            year = row['year']
 
             inputs, targets, seq_length = self._prepare_sequence(test_idx)
             inputs = inputs.to(self.device)
@@ -185,28 +182,25 @@ class SakuraReservoir:
             )
 
             # Calculate errors
-            mse_first = np.mean((unscaled_pred_first[~np.isnan(unscaled_pred_first)] -
-                                 unscaled_true_first[~np.isnan(unscaled_pred_first)]) ** 2)
-            mse_full = np.mean((unscaled_pred_full[~np.isnan(unscaled_pred_full)] -
-                                unscaled_true_full[~np.isnan(unscaled_pred_full)]) ** 2)
             mae_first = np.mean(np.abs(unscaled_pred_first - unscaled_true_first))
             mae_full = np.mean(np.abs(unscaled_pred_full - unscaled_true_full))
 
-            mse = (mse_first + mse_full) / 2
-            total_mse += mse
-
             # Store results with metadata
             predictions.append({
-                'site_name': site_name,
-                'year': year,
-                'true_first': unscaled_true_first.tolist(),
-                'true_full': unscaled_true_full.tolist(),
-                'pred_first': unscaled_pred_first.tolist(),
-                'pred_full': unscaled_pred_full.tolist(),
+                'site_name': row['site_name'],
+                'year': row['year'],
+                'start_date': row['data_start_date'],
+                'date_first': row['first_bloom'],
+                'date_full': row['full_bloom'],
+                'true_first_sequence': unscaled_true_first.tolist(),
+                'true_full_sequence': unscaled_true_full.tolist(),
+                'pred_first_sequence': unscaled_pred_first.tolist(),
+                'pred_full_sequence': unscaled_pred_full.tolist(),
                 'cutoff': cutoff,
+                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
+                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=int(unscaled_pred_first[-1])),
+                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=int(unscaled_pred_full[-1])),
                 'full_length': seq_length.item(),
-                'mse_first': mse_first,
-                'mse_full': mse_full,
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
@@ -215,20 +209,16 @@ class SakuraReservoir:
         predictions_df = pd.DataFrame(predictions)
 
         # Calculate overall metrics
-        avg_mse = total_mse / len(self.test_indices)
         avg_mae_first = predictions_df['mae_first'].mean()
         avg_mae_full = predictions_df['mae_full'].mean()
 
         # Print summary statistics
-        print(f"Average test MSE (unscaled): {avg_mse:.6e}")
-        print(f"RMSE (days): {np.sqrt(avg_mse):.2f}")
         print(f"MAE (days):")
         print(f"  First bloom: {avg_mae_first:.2f}")
         print(f"  Full bloom: {avg_mae_full:.2f}")
         print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
 
         metrics = {
-            'mse': float(avg_mse),
             'mae_first': float(avg_mae_first),
             'mae_full': float(avg_mae_full)
         }
@@ -239,18 +229,14 @@ class SakuraReservoir:
         self.reservoir.save(path=save_path)
 
     def load_model(self, load_path: str):
-        self.reservoir.load_state_dict(torch.load(load_path))
+        self.reservoir.load(load_path)
 
-    @property
-    def parameters(self):
+    def return_parameters(self, save_path: Optional[str] = None):
         """Get network parameters as a dictionary"""
-        params = {}
-        for name, param in self.reservoir.named_parameters():
-            # Convert tensor to Python list/float
-            if param.dim() == 0:  # scalar parameter
-                params[name] = float(param.item())
-            else:  # tensor parameter
-                params[name] = param.detach().cpu().numpy().tolist()
+        params = self.reservoir.reservoir_parameters
+        if save_path is not None:
+            with open(save_path + '/parameters.json', 'w') as f:
+                json.dump(params, f)
         return params
 
 
@@ -304,8 +290,7 @@ def main(save_data_path: str,
     if save_model_path is not None:
         sakura_rc.save_model(save_path=save_model_path)
     # save parameters
-    with open(save_data_path + 'parameters.json', 'w') as f:
-        json.dump(sakura_rc.parameters, f)
+    sakura_rc.return_parameters(save_path=save_data_path)
 
     # Test
     for cutoff in test_cutoff:

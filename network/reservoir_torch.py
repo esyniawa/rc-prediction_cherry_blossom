@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 from IPython.display import clear_output
 
 import os
-from typing import Optional
+from typing import Optional, Iterator
+
+from torch.nn import Parameter
 
 
 class Reservoir(nn.Module):
@@ -109,6 +111,20 @@ class Reservoir(nn.Module):
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
+
+    @property
+    def reservoir_parameters(self) -> dict:
+        return {
+            'dim_reservoir': self.dim_reservoir,
+            'dim_input': self.dim_input,
+            'dim_output': self.dim_output,
+            'tau': self.tau,
+            'chaos_factor': self.chaos_factor,
+            'probability_recurrent_connection': self.probability_recurrent_connection,
+            'seed': self.seed,
+            'device': self.device,
+            'noise_scaling': self.noise_scaling
+        }
 
 
 class ForceTrainer:
