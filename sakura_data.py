@@ -13,7 +13,8 @@ import pandas as pd
 import numpy as np
 
 from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, MaxAbsScaler
+from typing import Union, Type, Optional
 
 
 def parse_date(date_str: str, separator: str = ':'):
@@ -21,24 +22,79 @@ def parse_date(date_str: str, separator: str = ':'):
     return day, month
 
 
-def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
+def scale_column(
+        df: pd.DataFrame,
+        column_name: str,
+        scaler_type: Union[str, Type] = "minmax",
+        feature_range: tuple = (-1, 1),
+        scaler_kwargs: Optional[dict] = None
+) -> tuple[pd.DataFrame, object]:
     """
-    Enhanced function to scale a column containing either scalar values or lists
+    Function to scale a column containing either scalar values or lists using various scikit-learn scalers.
 
     :param df: DataFrame containing the column to scale
+    :type df: pd.DataFrame
     :param column_name: Name of the column to scale
-    :param a: Range for scaling (-a to a)
-    :return: Scaled DataFrame and fitted scaler
+    :type column_name: str
+    :param scaler_type: Type of scaler to use. Can be either a string ('minmax', 'standard',
+        'robust', 'maxabs') or a scikit-learn scaler class
+    :type scaler_type: Union[str, Type]
+    :param feature_range: Range for scaling (only used for MinMaxScaler)
+    :type feature_range: tuple
+    :param scaler_kwargs: Additional keyword arguments to pass to the scaler constructor
+    :type scaler_kwargs: Optional[dict]
+    :return: Tuple containing (Scaled DataFrame, fitted scaler)
+    :rtype: tuple[pd.DataFrame, object]
+
+    :example:
+
+    Using MinMaxScaler with custom range:
+    >>> df, scaler = scale_column(df, 'column_x', 'minmax', feature_range=(-2, 2))
+
+    Using StandardScaler:
+    >>> df, scaler = scale_column(df, 'column_x', 'standard')
+
+    Using custom scaler with specific parameters:
+    >>> df, scaler = scale_column(df, 'column_x', RobustScaler,
+    ...     scaler_kwargs={'quantile_range': (10, 90)})
     """
+    # Initialize scaler kwargs if None
+    scaler_kwargs = scaler_kwargs or {}
+
+    # Define scaler mapping
+    SCALER_MAP = {
+        'minmax': MinMaxScaler,
+        'standard': StandardScaler,
+        'robust': RobustScaler,
+        'maxabs': MaxAbsScaler
+    }
+
+    # Get the appropriate scaler class
+    if isinstance(scaler_type, str):
+        scaler_type = scaler_type.lower()
+        if scaler_type not in SCALER_MAP:
+            raise ValueError(f"Unknown scaler type: {scaler_type}. "
+                             f"Available types: {list(SCALER_MAP.keys())}")
+        scaler_class = SCALER_MAP[scaler_type]
+    else:
+        scaler_class = scaler_type
+
+    # Configure scaler with appropriate parameters
+    if scaler_class == MinMaxScaler:
+        scaler_kwargs['feature_range'] = feature_range
+
+    # Create scaler instance
+    scaler = scaler_class(**scaler_kwargs)
+
     # Check if the column contains lists/arrays
     is_list_column = isinstance(df[column_name].iloc[0], (list, np.ndarray))
 
     if is_list_column:
         # Concatenate all arrays in the column
-        all_values = np.concatenate([np.array(x).flatten() for x in df[column_name] if len(x) > 0])
+        all_values = np.concatenate([np.array(x).flatten()
+                                     for x in df[column_name] if len(x) > 0])
 
-        # Create and fit scaler
-        scaler = MinMaxScaler(feature_range=(-a, a))
+        # Fit scaler on all values
         scaler.fit(all_values.reshape(-1, 1))
 
         # Function to scale lists/arrays
@@ -51,8 +107,7 @@ def scale_column(df: pd.DataFrame, column_name: str, a: float = 1.):
         df[column_name] = df[column_name].apply(scale_list)
 
     else:
-        # Original scalar scaling logic
-        scaler = MinMaxScaler(feature_range=(-a, a))
+        # Scale scalar values
         df[column_name] = scaler.fit_transform(df[column_name].values.reshape(-1, 1))
 
     return df, scaler
@@ -66,7 +121,7 @@ def process_data(temp_df: pd.DataFrame,
                  start_day: int = 1,
                  drop_inadequate_temps: bool = True) -> pd.DataFrame:
     """
-    Function to merge the different datasets
+    Function to merge the different datasets for sakura prediction
 
     :param temp_df: Dataframe with temperature data of different japanese cities
     :param first_bloom_df: Dataframe with the beginning of the sakura bloom dates for different japanese cities
@@ -256,7 +311,7 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
     scalers = {}
     if scale_data is not None:
         for column in ['countdown_to_first', 'countdown_to_full', 'temps_to_first', 'temps_to_full', 'lat', 'lng']:
-            result_df, scalers[column] = scale_column(df=result_df, column_name=column, a=scale_data)
+            result_df, scalers[column] = scale_column(df=result_df, column_name=column)
 
     print('Saving data...')
     if file_path is not None:
