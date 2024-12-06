@@ -112,7 +112,6 @@ class Reservoir(nn.Module):
     def load(self, path):
         self.load_state_dict(torch.load(path))
 
-    @property
     def reservoir_parameters(self) -> dict:
         return {
             'dim_reservoir': self.dim_reservoir,

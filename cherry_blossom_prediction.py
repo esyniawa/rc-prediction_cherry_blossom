@@ -233,7 +233,7 @@ class SakuraReservoir:
 
     def return_parameters(self, save_path: Optional[str] = None):
         """Get network parameters as a dictionary"""
-        params = self.reservoir.reservoir_parameters
+        params = self.reservoir.reservoir_parameters()
         if save_path is not None:
             with open(save_path + '/parameters.json', 'w') as f:
                 json.dump(params, f)
