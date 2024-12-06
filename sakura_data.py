@@ -14,7 +14,7 @@ import numpy as np
 
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, MaxAbsScaler
-from typing import Union, Type, Optional
+from typing import Union, Type, Optional, Literal
 
 
 def parse_date(date_str: str, separator: str = ':'):
@@ -113,6 +113,29 @@ def scale_column(
     return df, scaler
 
 
+def interpolate_values(data_row: pd.Series,
+                       min_points: int) -> list:
+    # Replace empty values with NaN
+    data_row = data_row.replace(['', 'missing', None], np.nan)
+
+    # Check the number of valid points
+    valid_points = data_row.dropna().size
+
+    # Case 1: Insufficient data points
+    if valid_points < min_points:
+        return []
+
+    # Case 2: Sufficient data points
+    else:
+        try:
+            interpolated = data_row.interpolate(method='spline', order=2, limit_direction='both')
+            return interpolated.tolist()
+        except Exception:
+            # Fallback to linear interpolation if spline fails
+            interpolated = data_row.interpolate(method='linear', limit_direction='both')
+            return interpolated.tolist()
+
+
 def process_data(temp_df: pd.DataFrame,
                  first_bloom_df: pd.DataFrame,
                  full_bloom_df: pd.DataFrame,
@@ -175,7 +198,9 @@ def process_data(temp_df: pd.DataFrame,
     # Convert temps_df date column to datetime
     temp_df['Date'] = pd.to_datetime(temp_df['Date'])
 
-    def get_temp_sequence(row, temp_df, start_date, end_date):
+    def get_temp_sequence(row: pd.Series, temp_df: pd.DataFrame,
+                          start_date: datetime, end_date: datetime):
+
         # Convert start_date and end_date to pandas Timestamp
         start_date = pd.Timestamp(start_date)
         end_date = pd.Timestamp(end_date)
@@ -187,7 +212,8 @@ def process_data(temp_df: pd.DataFrame,
         temps = temp_df.loc[mask, row['Site Name']].tolist()
 
         # Interpolate missing values
-        temps = pd.Series(temps).interpolate(method='linear').tolist()
+        # interpolation_methods: Literal['linear', 'spline', 'nearest', 'pchip', 'slinear', 'polynomial'] = 'spline'
+        temps = interpolate_values(pd.Series(temps), min_points=10)
 
         return temps
 

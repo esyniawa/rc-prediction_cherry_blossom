@@ -136,8 +136,6 @@ class SakuraReservoir:
         :return: predictions_df: DataFrame containing predictions and metadata
                  metrics: Dictionary containing overall error metrics
         """
-        assert 0.0 <= sequence_offset <= 1.0, "sequence offset is a fraction between 0.0 and 1.0!"
-
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
         predictions = []
