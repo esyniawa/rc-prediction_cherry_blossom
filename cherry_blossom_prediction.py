@@ -22,6 +22,7 @@ class SakuraReservoir:
                  alpha_FORCE: float = 1.0,
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
+                 tqdm_bar_position: int = 0,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         """Initialize the Sakura Reservoir Computer"""
         print(f"PyTorch version: {torch.__version__} | Using device: {device}")
@@ -29,6 +30,7 @@ class SakuraReservoir:
         self.device = device
         self.train_percentage = train_percentage
         self.seed = seed
+        self.tqdm_bar_position = tqdm_bar_position
 
         # Load and process data
         self.df, self.scalers = load_sakura_data()
@@ -106,7 +108,7 @@ class SakuraReservoir:
 
     def train(self, dt: float = 0.1):
         """Train the reservoir on the sakura dataset"""
-        for train_idx in tqdm(self.train_indices, desc="Training"):
+        for train_idx in tqdm(self.train_indices, desc="Training", position=self.tqdm_bar_position):
             inputs, targets, seq_length = self._prepare_sequence(train_idx)
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
@@ -139,7 +141,7 @@ class SakuraReservoir:
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
         predictions = []
-        for test_idx in tqdm(self.test_indices, desc="Testing"):
+        for test_idx in tqdm(self.test_indices, desc="Testing", position=self.tqdm_bar_position):
             # Get metadata for this sequence
             row = self.df.iloc[test_idx]
 
@@ -252,6 +254,7 @@ def main(save_data_path: str,
          save_model_path: Optional[str] = None,
          do_plot: bool = True,
          seed: Optional[int] = None,
+         tqdm_bar_position: int = 0,
          device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
 
     assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
@@ -280,7 +283,8 @@ def main(save_data_path: str,
         alpha_FORCE=alpha,
         probability_recurrent_connection=probability_recurrent_connection,
         seed=seed,
-        device=device
+        device=device,
+        tqdm_bar_position=tqdm_bar_position
     )
 
     # Train
@@ -342,4 +346,5 @@ if __name__ == "__main__":
          noise_scaling=args.noise_scaling,
          seed=args.seed,
          do_plot=True,
-         device=torch.device(args.device))
+         device=torch.device(args.device),
+         tqdm_bar_position=args.sim_id)

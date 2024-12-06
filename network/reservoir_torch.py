@@ -120,7 +120,6 @@ class Reservoir(nn.Module):
             'tau': self.tau,
             'chaos_factor': self.chaos_factor,
             'probability_recurrent_connection': self.probability_recurrent_connection,
-            'seed': self.seed,
             'device': self.device,
             'noise_scaling': self.noise_scaling
         }
