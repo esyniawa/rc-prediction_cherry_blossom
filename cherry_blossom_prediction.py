@@ -22,15 +22,15 @@ class SakuraReservoir:
                  alpha_FORCE: float = 1.0,
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
-                 tqdm_bar_position: int = 0,
+                 sim_id: int = 0,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         """Initialize the Sakura Reservoir Computer"""
-        print(f"PyTorch version: {torch.__version__} | Using device: {device}")
+        print(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
         self.train_percentage = train_percentage
         self.seed = seed
-        self.tqdm_bar_position = tqdm_bar_position
+        self.tqdm_bar_position = sim_id
 
         # Load and process data
         self.df, self.scalers = load_sakura_data()
@@ -108,7 +108,7 @@ class SakuraReservoir:
 
     def train(self, dt: float = 0.1):
         """Train the reservoir on the sakura dataset"""
-        for train_idx in tqdm(self.train_indices, desc="Training", position=self.tqdm_bar_position):
+        for train_idx in tqdm(self.train_indices, desc=f"Training {self.tqdm_bar_position}", position=self.tqdm_bar_position):
             inputs, targets, seq_length = self._prepare_sequence(train_idx)
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
@@ -141,7 +141,7 @@ class SakuraReservoir:
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
         predictions = []
-        for test_idx in tqdm(self.test_indices, desc="Testing", position=self.tqdm_bar_position):
+        for test_idx in tqdm(self.test_indices, desc=f"Testing {self.tqdm_bar_position}", position=self.tqdm_bar_position):
             # Get metadata for this sequence
             row = self.df.iloc[test_idx]
 
@@ -284,7 +284,7 @@ def main(save_data_path: str,
         probability_recurrent_connection=probability_recurrent_connection,
         seed=seed,
         device=device,
-        tqdm_bar_position=tqdm_bar_position
+        sim_id=tqdm_bar_position
     )
 
     # Train
