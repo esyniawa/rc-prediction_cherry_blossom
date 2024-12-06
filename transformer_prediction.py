@@ -33,21 +33,24 @@ class PositionalEncoding(nn.Module):
 
 class SakuraTransformer(nn.Module):
     def __init__(
-            self,
-            d_model: int = 64,
-            nhead: int = 8,
-            num_encoder_layers: int = 6,
-            num_decoder_layers: int = 6,
-            dim_feedforward: int = 256,
-            dropout: float = 0.1,
-            device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self,
+        d_model: int = 64,
+        nhead: int = 8,
+        num_encoder_layers: int = 6,
+        num_decoder_layers: int = 6,
+        dim_feedforward: int = 256,
+        dropout: float = 0.1,
+        device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ):
         super().__init__()
 
         self.device = device
 
-        # Input projection (from 3D to d_model dimensions)
-        self.input_projection = nn.Linear(3, d_model)
+        # Input projection for source (3D input)
+        self.src_projection = nn.Linear(3, d_model)
+
+        # Input projection for target (2D input)
+        self.tgt_projection = nn.Linear(2, d_model)
 
         # Positional encoding
         self.pos_encoder = PositionalEncoding(d_model)
@@ -67,15 +70,16 @@ class SakuraTransformer(nn.Module):
         self.output_projection = nn.Linear(d_model, 2)
 
     def forward(
-            self,
-            src: torch.Tensor,
-            tgt: torch.Tensor,
-            src_mask: Optional[torch.Tensor] = None,
-            tgt_mask: Optional[torch.Tensor] = None
+        self,
+        src: torch.Tensor,
+        tgt: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        tgt_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        # Project input to d_model dimensions
-        src = self.input_projection(src)
-        tgt = self.input_projection(tgt)
+
+        # Project source and target inputs to d_model dimensions
+        src = self.src_projection(src)
+        tgt = self.tgt_projection(tgt)
 
         # Add positional encoding
         src = self.pos_encoder(src)
@@ -189,7 +193,7 @@ class SakuraTransformerPredictor:
 
         return unscaled_data
 
-    def train(self, num_epochs: int = 100, batch_size: int = 32):
+    def train(self, num_epochs: int = 50, batch_size: int = 32, normalize_batches: bool = False):
         """Train the transformer"""
         self.model.train()
 
@@ -212,6 +216,10 @@ class SakuraTransformerPredictor:
                     inputs, targets, seq_length = self._prepare_sequence(train_idx)
                     batch_inputs[batch_idx, :seq_length] = inputs
                     batch_targets[batch_idx, :seq_length] = targets
+
+                if normalize_batches:
+                    batch_inputs = (batch_inputs - batch_inputs.mean()) / batch_inputs.std()
+                    batch_targets = (batch_targets - batch_targets.mean()) / batch_targets.std()
 
                 # Create target mask
                 tgt_mask = self.model.generate_square_subsequent_mask(max_seq_len)
@@ -238,9 +246,7 @@ class SakuraTransformerPredictor:
     def test(self, sequence_offset: float = 1.0):
         """
         Test the transformer's predictions
-
-        Args:
-            sequence_offset: Fraction of the sequence to simulate (0.0 to 1.0)
+        :param sequence_offset: Fraction of the sequence to simulate (0.0 to 1.0)
         """
         self.model.eval()
         predictions = []
@@ -359,6 +365,7 @@ def main(save_data_path: str,
          seed: Optional[int] = None,
          tqdm_bar_position: int = 0,
          device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+
     assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
 
     if do_plot:

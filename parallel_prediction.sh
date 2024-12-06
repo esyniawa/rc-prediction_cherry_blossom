@@ -13,19 +13,19 @@ format_time() {
 start_time=$(date +%s)
 
 # Run simulations in parallel
-python cherry_blossom_prediction.py --sim_id 1 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.2 --device cuda:0 &
-python cherry_blossom_prediction.py --sim_id 2 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.2 --device cuda:1 &
-python cherry_blossom_prediction.py --sim_id 3 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.5 --device cuda:0 &
-python cherry_blossom_prediction.py --sim_id 4 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.5 --device cuda:1
+python reservoir_prediction.py --sim_id 1 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.2 --device cuda:0 &
+python reservoir_prediction.py --sim_id 2 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.2 --device cuda:1 &
+python reservoir_prediction.py --sim_id 3 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.5 --device cuda:0 &
+python reservoir_prediction.py --sim_id 4 --dim_reservoir 5000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.5 --device cuda:1
 
 # Wait for all processes to finish
 wait
 
 # Start next set of simulations in parallel
-python cherry_blossom_prediction.py --sim_id 1 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.2 --device cuda:0 &
-python cherry_blossom_prediction.py --sim_id 2 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.2 --device cuda:1 &
-python cherry_blossom_prediction.py --sim_id 3 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.5 --device cuda:0 &
-python cherry_blossom_prediction.py --sim_id 4 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.5 --device cuda:1
+python reservoir_prediction.py --sim_id 1 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.2 --device cuda:0 &
+python reservoir_prediction.py --sim_id 2 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.2 --device cuda:1 &
+python reservoir_prediction.py --sim_id 3 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.1 --chaos_factor 1.5 --device cuda:0 &
+python reservoir_prediction.py --sim_id 4 --dim_reservoir 10000 --seed 42 --prop_recurrent 0.2 --chaos_factor 1.5 --device cuda:1
 
 wait
 
