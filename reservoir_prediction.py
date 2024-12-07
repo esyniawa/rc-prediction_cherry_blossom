@@ -24,7 +24,7 @@ class SakuraReservoir:
                  load_pretrained_model: Optional[str] = None,
                  sim_id: int = 0,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
-        """Initialize the Sakura Reservoir Computer"""
+        """Initialize the Sakura Reservoir"""
         print(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
@@ -46,6 +46,8 @@ class SakuraReservoir:
             chaos_factor=chaos_factor,
             device=device
         )
+        # save noise scaling to switch it on and off between training and testing
+        self.noise_scaling = noise_scaling
 
         if load_pretrained_model is not None:
             self.reservoir.load(load_pretrained_model)
@@ -95,7 +97,8 @@ class SakuraReservoir:
 
         return inputs, targets, torch.tensor(seq_length)
 
-    def _inverse_transform_predictions(self, scaled_data: np.ndarray, scaler, is_sequence: bool = True) -> np.ndarray:
+    @staticmethod
+    def _inverse_transform_predictions(scaled_data: np.ndarray, scaler, is_sequence: bool = True) -> np.ndarray:
         """Inverse transform scaled predictions back to original scale"""
         if is_sequence:
             original_shape = scaled_data.shape
@@ -108,6 +111,10 @@ class SakuraReservoir:
 
     def train(self, dt: float = 0.1):
         """Train the reservoir on the sakura dataset"""
+        # set noise scaling for training
+        if not self.reservoir.noise_scaling:
+            self.reservoir.noise_scaling = self.noise_scaling
+
         for train_idx in tqdm(self.train_indices, desc=f"Training {self.tqdm_bar_position}", position=self.tqdm_bar_position):
             inputs, targets, seq_length = self._prepare_sequence(train_idx)
             inputs = inputs.to(self.device)
@@ -124,8 +131,6 @@ class SakuraReservoir:
                     dt=dt
                 )
 
-        print("Training complete!")
-
     def test(self, dt: float = 0.1, sequence_offset: float = 1.0):
         """
         Test the prediction of the reservoir on the test set
@@ -136,6 +141,10 @@ class SakuraReservoir:
         :return: predictions_df: DataFrame containing predictions and metadata
                  metrics: Dictionary containing overall error metrics
         """
+        # set noise scaling to 0 for testing
+        if self.reservoir.noise_scaling:
+            self.reservoir.noise_scaling = 0.0
+
         print(f"\nTesting on {len(self.test_indices)} sequences...")
 
         predictions = []
@@ -213,7 +222,7 @@ class SakuraReservoir:
         avg_mae_full = predictions_df['mae_full'].mean()
 
         # Print summary statistics
-        print(f"MAE (days):")
+        print(f"\nMAE (days):")
         print(f"  First bloom: {avg_mae_first:.2f}")
         print(f"  Full bloom: {avg_mae_full:.2f}")
         print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
@@ -231,12 +240,26 @@ class SakuraReservoir:
     def load_model(self, load_path: str):
         self.reservoir.load(load_path)
 
-    def return_parameters(self, save_path: Optional[str] = None):
-        """Get network parameters as a dictionary"""
-        params = self.reservoir.reservoir_parameters()
+    def dump_parameters(self, save_path: Optional[str] = None):
+        import json
+        """Get network parameters as a dictionary, ensuring all values are JSON serializable"""
+        params = {
+            'dim_reservoir': self.reservoir.dim_reservoir,
+            'dim_input': self.reservoir.dim_input,
+            'dim_output': self.reservoir.dim_output,
+            'tau': self.reservoir.tau,
+            'chaos_factor': self.reservoir.chaos_factor,
+            'probability_recurrent_connection': self.reservoir.probability_recurrent_connection,
+            'device': str(self.reservoir.device),
+            'noise_scaling': self.reservoir.noise_scaling
+        }
+
         if save_path is not None:
-            with open(save_path + '/parameters.json', 'w') as f:
-                json.dump(params, f)
+            os.makedirs(save_path, exist_ok=True)
+            # Save parameters to JSON file
+            with open(os.path.join(save_path, 'parameters.json'), 'w') as f:
+                json.dump(params, f, indent=4)
+
         return params
 
 
@@ -292,7 +315,7 @@ def main(save_data_path: str,
     if save_model_path is not None:
         sakura_rc.save_model(save_path=save_model_path)
     # save parameters
-    sakura_rc.return_parameters(save_path=save_data_path)
+    sakura_rc.dump_parameters(save_path=save_data_path)
 
     # Test
     for cutoff in test_cutoff:
@@ -324,19 +347,21 @@ if __name__ == "__main__":
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--chaos_factor', type=float, default=1.5)
     parser.add_argument('--noise_scaling', type=float, default=0.02)
+    parser.add_argument('--training_set_size', type=float, default=0.8)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
 
     # folder
     save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
-    cutoffs = [0.5, 0.7, 0.75, 0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95, 0.975,]
+    cutoffs = [0.5, ]
 
     # run model
     main(save_data_path=save_data_path,
+         save_model_path=save_data_path + '/reservoir_model.pt',
          test_cutoff=cutoffs,
          dim_reservoir=args.dim_reservoir,
-         training_set_size=0.8,
+         training_set_size=args.training_set_size,
          dt=0.1,
          chaos_factor=args.chaos_factor,
          alpha=args.alpha,

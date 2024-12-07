@@ -213,7 +213,7 @@ def process_data(temp_df: pd.DataFrame,
 
         # Interpolate missing values
         # interpolation_methods: Literal['linear', 'spline', 'nearest', 'pchip', 'slinear', 'polynomial'] = 'spline'
-        temps = interpolate_values(pd.Series(temps), min_points=10)
+        temps = interpolate_values(pd.Series(temps), min_points=30)
 
         return temps
 
@@ -336,6 +336,7 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
 
     scalers = {}
     if scale_data is not None:
+        # TODO: Change list into dict to change the scaler for each column
         for column in ['countdown_to_first', 'countdown_to_full', 'temps_to_first', 'temps_to_full', 'lat', 'lng']:
             result_df, scalers[column] = scale_column(df=result_df, column_name=column)
 

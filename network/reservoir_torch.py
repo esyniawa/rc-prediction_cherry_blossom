@@ -7,8 +7,6 @@ from IPython.display import clear_output
 import os
 from typing import Optional, Iterator
 
-from torch.nn import Parameter
-
 
 class Reservoir(nn.Module):
     def __init__(self,
@@ -111,18 +109,6 @@ class Reservoir(nn.Module):
 
     def load(self, path):
         self.load_state_dict(torch.load(path))
-
-    def reservoir_parameters(self) -> dict:
-        return {
-            'dim_reservoir': self.dim_reservoir,
-            'dim_input': self.dim_input,
-            'dim_output': self.dim_output,
-            'tau': self.tau,
-            'chaos_factor': self.chaos_factor,
-            'probability_recurrent_connection': self.probability_recurrent_connection,
-            'device': self.device,
-            'noise_scaling': self.noise_scaling
-        }
 
 
 class ForceTrainer:
