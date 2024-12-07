@@ -354,7 +354,7 @@ if __name__ == "__main__":
 
     # folder
     save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
-    cutoffs = [0.5, ]
+    cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980, 0.990,]
 
     # run model
     main(save_data_path=save_data_path,
