@@ -259,7 +259,7 @@ def process_data(temp_df: pd.DataFrame,
             # Create countdown sequences
             # countdown_to_first continues to negative values until reaching the full bloom date
             countdown_to_first = list(
-                range(days_to_first, days_to_first - bloom_offset - 1, -1))  # [days_to_first, ..., -bloom_offset]
+                range(days_to_first, -bloom_offset - 1, -1))  # [days_to_first, ..., -bloom_offset]
             countdown_to_full = list(
                 range(days_to_full, -1, -1))  # [days_to_full, ..., 0]
 
