@@ -56,6 +56,34 @@ def find_latest_date(df):
     return latest_date, latest_day_of_year
 
 
+def calculate_date_difference(df: pd.DataFrame, start_date_col: str, end_date_col: str) -> pd.Series:
+    """
+    Calculate the difference in days between two date columns in a pandas DataFrame.
+    """
+    # Convert columns to datetime if they aren't already
+    df[start_date_col] = pd.to_datetime(df[start_date_col])
+    df[end_date_col] = pd.to_datetime(df[end_date_col])
+
+    # Calculate the difference in days
+    days_difference = (df[end_date_col] - df[start_date_col]).dt.days
+
+    return days_difference
+
+
+def get_list_length_stats(df: pd.DataFrame, list_column: str):
+    """
+    Calculate the minimum and maximum length of lists in a DataFrame column.
+    """
+    # Calculate lengths of all lists in the column
+    list_lengths = df[list_column].apply(len)
+
+    # Get minimum and maximum lengths
+    min_length = list_lengths.min()
+    max_length = list_lengths.max()
+
+    return min_length, max_length
+
+
 def plot_mae_results(predictions_df: pd.DataFrame, save_path: Optional[str] = None):
     """
     Create bar and line plots of MAE by site and year
