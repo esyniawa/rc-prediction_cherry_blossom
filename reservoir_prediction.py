@@ -25,7 +25,7 @@ class SakuraReservoir:
                  sim_id: int = 0,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         """Initialize the Sakura Reservoir"""
-        print(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
+        tqdm.write(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
         self.train_percentage = train_percentage
@@ -145,7 +145,7 @@ class SakuraReservoir:
         if self.reservoir.noise_scaling:
             self.reservoir.noise_scaling = 0.0
 
-        print(f"\nTesting on {len(self.test_indices)} sequences...")
+        tqdm.write(f"\nTesting on {len(self.test_indices)} sequences...")
 
         predictions = []
         for test_idx in tqdm(self.test_indices, desc=f"Testing {self.tqdm_bar_position}", position=self.tqdm_bar_position):
@@ -223,10 +223,10 @@ class SakuraReservoir:
         avg_mae_full = predictions_df['mae_full'].mean()
 
         # Print summary statistics
-        print(f"\nMAE (days):")
-        print(f"  First bloom: {avg_mae_first:.2f}")
-        print(f"  Full bloom: {avg_mae_full:.2f}")
-        print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
+        tqdm.write(f"\nMAE (days):")
+        tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
+        tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
+        tqdm.write(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
 
         metrics = {
             'mae_first': float(avg_mae_first),

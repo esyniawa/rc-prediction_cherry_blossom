@@ -115,7 +115,7 @@ class SakuraTransformerPredictor:
             device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ):
         """Initialize the Sakura Transformer"""
-        print(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
+        tqdm.write(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
         self.train_percentage = train_percentage
@@ -239,9 +239,9 @@ class SakuraTransformerPredictor:
                 num_batches += 1
 
             # Print epoch statistics
-            avg_loss = total_loss / num_batches
-            if (epoch + 1) % 10 == 0:
-                print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
+            #avg_loss = total_loss / num_batches
+            #if (epoch + 1) % 10 == 0:
+            #    tqdm.write(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
 
     def test(self, sequence_offset: float = 1.0):
         """
@@ -328,10 +328,10 @@ class SakuraTransformerPredictor:
         avg_mae_full = predictions_df['mae_full'].mean()
 
         # Print summary statistics
-        print(f"MAE (days):")
-        print(f"  First bloom: {avg_mae_first:.2f}")
-        print(f"  Full bloom: {avg_mae_full:.2f}")
-        print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
+        tqdm.write(f"\nMAE (days):")
+        tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
+        tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
+        tqdm.write(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
 
         metrics = {
             'mae_first': float(avg_mae_first),
