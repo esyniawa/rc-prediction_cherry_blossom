@@ -312,9 +312,9 @@ class SakuraTransformerPredictor:
                     'cutoff': cutoff,
                     'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
                     'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(
-                        days=cutoff) + datetime.timedelta(days=int(unscaled_pred_first[-1])),
+                        days=cutoff) + datetime.timedelta(days=float(unscaled_pred_first[-1])),
                     'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(
-                        days=cutoff) + datetime.timedelta(days=int(unscaled_pred_full[-1])),
+                        days=cutoff) + datetime.timedelta(days=float(unscaled_pred_full[-1])),
                     'full_length': seq_length.item(),
                     'mae_first': mae_first,
                     'mae_full': mae_full
