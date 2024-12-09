@@ -12,7 +12,7 @@ from sakura_data import load_sakura_data
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_seq_length: int = 5000):
+    def __init__(self, d_model: int, max_seq_length: int = 366):
         super().__init__()
 
         # Create positional encoding matrix
