@@ -106,6 +106,8 @@ def analyse_predictions(folder_stem: str = 'src_test/reservoir_size_2000',
             mae_full[f'std_{cutoff}'] = offsets.std()
 
         # save errors
+        if save_path[-1] != '/':
+            save_path += '/'
         save_in_folder = save_path + f'sim_id_{sim_id}/'
         os.makedirs(save_in_folder, exist_ok=True)
 
