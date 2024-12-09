@@ -3,7 +3,8 @@ import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
-from typing import Optional
+from typing import Optional, Iterable
+from glob import glob
 
 
 def safe_save(save_name: str, array: np.ndarray) -> None:
@@ -68,6 +69,100 @@ def calculate_date_difference(df: pd.DataFrame, start_date_col: str, end_date_co
     days_difference = (df[end_date_col] - df[start_date_col]).dt.days
 
     return days_difference
+
+
+def analyse_predictions(folder_stem: str = 'src_test/reservoir_size_2000',
+                        sim_ids: Iterable[int] = (1, 2, 3, 4),
+                        save_path: str = 'src_analysis/', ):
+
+    best_mae_first = np.inf
+    best_mae_full = np.inf
+    best_sim_first = None
+    best_sim_full = None
+
+    for sim_id in sim_ids:
+        pattern = f'{folder_stem}/sim_id_{sim_id}/test_cutoff_*/predictions.parquet'
+
+        mae_first = {}
+        mae_full = {}
+
+        for file_path in glob(pattern):
+            folder_name = os.path.basename(os.path.dirname(file_path))
+            cutoff = float(folder_name.split('_')[-1])  # nothing hacky here move on
+
+            # load data
+            df = pd.read_parquet(file_path)
+
+            # prediction errors for beginning of the blossom
+            offsets = calculate_date_difference(df, start_date_col='date_first', end_date_col='pred_first_bloom_date')
+
+            mae_first[f'mean_{cutoff}'] = np.abs(offsets).mean()
+            mae_first[f'std_{cutoff}'] =  np.abs(offsets).std()
+
+            # prediction errors for full bloom
+            offsets = calculate_date_difference(df, start_date_col='date_full', end_date_col='pred_full_bloom_date')
+
+            mae_full[f'mean_{cutoff}'] = np.abs(offsets).mean()
+            mae_full[f'std_{cutoff}'] = offsets.std()
+
+        # save errors
+        save_in_folder = save_path + f'sim_id_{sim_id}/'
+        os.makedirs(save_in_folder, exist_ok=True)
+
+        # Convert to DataFrame with an index
+        pd.DataFrame([mae_first], index=['values']).transpose().to_csv(save_in_folder + 'mae_first.csv')
+        pd.DataFrame([mae_full], index=['values']).transpose().to_csv(save_in_folder + 'mae_full.csv')
+
+        # Plot the errors
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 12))
+
+        sorted_first = dict(sorted(mae_first.items(), key=lambda x: float(x[0].split('_')[1])))
+        sorted_full = dict(sorted(mae_full.items(), key=lambda x: float(x[0].split('_')[1])))
+
+        cutoffs = [float(k.split('_')[1]) for k in sorted_first.keys() if k.startswith('mean')]
+        means_first = [sorted_first[f'mean_{c}'] for c in cutoffs]
+        stds_first = [sorted_first[f'std_{c}'] for c in cutoffs]
+        means_full = [sorted_full[f'mean_{c}'] for c in cutoffs]
+        stds_full = [sorted_full[f'std_{c}'] for c in cutoffs]
+
+        # Plot with fill_between for standard deviation
+        ax1.plot(cutoffs, means_first, 'b-', marker='o')
+        ax1.fill_between(cutoffs,
+                         [m - s for m, s in zip(means_first, stds_first)],
+                         [m + s for m, s in zip(means_first, stds_first)],
+                         alpha=0.2)
+        ax1.set_xlabel('Cutoff Days')
+        ax1.set_ylabel('Mean Absolute Error (days)')
+        ax1.set_title('First Bloom MAE')
+        ax1.grid(True)
+
+        ax2.plot(cutoffs, means_full, 'g-', marker='o')
+        ax2.fill_between(cutoffs,
+                         [m - s for m, s in zip(means_full, stds_full)],
+                         [m + s for m, s in zip(means_full, stds_full)],
+                         alpha=0.2)
+        ax2.set_xlabel('Cutoff Days')
+        ax2.set_ylabel('Mean Absolute Error (days)')
+        ax2.set_title('Full Bloom MAE')
+        ax2.grid(True)
+
+        plt.tight_layout()
+        plt.savefig(save_in_folder + 'mae_plots.png')
+        plt.close()
+
+        # update best
+        hlp_first = np.mean(means_first)
+        if hlp_first < best_mae_first:
+            best_mae_first = hlp_first
+            best_sim_first = sim_id
+
+        hlp_full = np.mean(means_full)
+        if hlp_full < best_mae_full:
+            best_mae_full = hlp_full
+            best_sim_full = sim_id
+
+    print(f'Best MAE first: {best_mae_first} for sim_id {best_sim_first}')
+    print(f'Best MAE full: {best_mae_full} for sim_id {best_sim_full}')
 
 
 def get_list_length_stats(df: pd.DataFrame, list_column: str):
