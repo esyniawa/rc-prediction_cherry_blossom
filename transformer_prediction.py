@@ -442,7 +442,7 @@ if __name__ == "__main__":
 
     # Folder
     save_data_path = f'src_test/transformer_d{args.d_model}_h{args.nhead}/sim_id_{args.sim_id}/'
-    cutoffs = [0.5, 0.7, 0.75, 0.8, 0.825, 0.85, 0.875, 0.9, 0.925, 0.95, 0.975]
+    cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980, 0.990,]
 
     # Run model
     main(save_data_path=save_data_path,
