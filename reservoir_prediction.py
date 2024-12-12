@@ -48,6 +48,9 @@ class SakuraReservoir:
             device=device
         )
 
+        if load_pretrained_model is not None:
+            self.reservoir.load(load_pretrained_model)
+
         # Initialize trainer
         self.trainer = ForceTrainer(self.reservoir, alpha=alpha_FORCE)
 
@@ -258,7 +261,6 @@ class SakuraReservoir:
             mae_full = np.mean(np.abs(unscaled_pred_full - unscaled_true_full))
 
             # Store results with metadata
-            # TODO: Calculate blossom dates with floats instead of ints
             predictions.append({
                 'site_name': row['site_name'],
                 'year': row['year'],

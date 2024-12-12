@@ -22,6 +22,7 @@ class Reservoir(nn.Module):
                  seed: Optional[int] = None,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
         super().__init__()
+
         # Set random seed
         if seed is not None:
             torch.manual_seed(seed)
@@ -42,11 +43,60 @@ class Reservoir(nn.Module):
         self.W = self._initialize_reservoir_weights().to(device)
         self.W_in = (torch.randn(dim_reservoir, dim_input) * feedforward_scaling / np.sqrt(dim_input)).to(device)
         self.W_fb = (torch.randn(dim_reservoir, dim_output) * feedback_scaling / np.sqrt(dim_output)).to(device)
-        self.W_out = torch.zeros(dim_output, dim_reservoir).to(device)  # initialize readout weights
+        self.W_out = torch.zeros(dim_output, dim_reservoir).to(device)
+
+        # Pre-allocate buffers for computations
+        self.state_buffer = torch.zeros(dim_reservoir, device=device)
+        self.noise_buffer = torch.zeros(dim_reservoir, device=device)
+        self.dr_buffer = torch.zeros(dim_reservoir, device=device)
 
         # Initialize states
         self.noise_scaling = noise_scaling
         self.reset_state()
+
+    @torch.no_grad()
+    def forward(self, input_signal, dt: float = 0.1):
+        # Ensure input is on correct device and properly shaped
+        input_signal = input_signal.to(self.device).view(self.dim_input)
+
+        # In-place computation of total input to reservoir neurons using pre-allocated buffer
+        # First, compute W * r
+        torch.mm(self.W.unsqueeze(0), self.r.unsqueeze(1), out=self.state_buffer.unsqueeze(1))
+        self.state_buffer = self.state_buffer.squeeze()
+
+        # Add W_in * input
+        self.state_buffer.addmm_(self.W_in, input_signal.unsqueeze(1).float(), beta=1.0, alpha=1.0)
+
+        # Add W_fb * output
+        self.state_buffer.addmm_(self.W_fb, self.output.unsqueeze(1).float(), beta=1.0, alpha=1.0)
+
+        # Add noise in-place
+        if self.noise_scaling > 0:
+            self.noise_buffer.normal_(0, self.noise_scaling)
+            self.state_buffer.add_(self.noise_buffer)
+
+        # Update reservoir state using in-place operations
+        # dr = (-r + tanh(state)) / tau
+        torch.tanh(self.state_buffer, out=self.dr_buffer)
+        self.dr_buffer.sub_(self.r)  # dr = tanh(state) - r
+        self.dr_buffer.div_(self.tau)  # dr = (tanh(state) - r) / tau
+
+        # Update r using in-place addition
+        self.r.add_(self.dr_buffer, alpha=dt)  # r += dt * dr
+
+        # Compute output
+        self.output = self.step()
+
+        return self.output
+
+    @torch.no_grad()
+    def step(self):
+        # Use in-place matrix multiplication for output computation
+        return torch.mm(self.W_out, self.r.unsqueeze(1)).squeeze()
+
+    def reset_state(self):
+        self.r = torch.zeros(self.dim_reservoir, device=self.device)
+        self.output = torch.zeros(self.dim_output, device=self.device)
 
     def _initialize_reservoir_weights(self):
         """
@@ -72,34 +122,6 @@ class Reservoir(nn.Module):
 
         return W
 
-    @torch.no_grad()
-    def forward(self, input_signal, dt: float = 0.1):
-        # Ensure input is on correct device and properly shaped
-        input_signal = input_signal.to(self.device).view(self.dim_input)
-
-        # Compute total input to reservoir neurons
-        state = (torch.matmul(self.W, self.r) +
-                 torch.matmul(self.W_in, input_signal.float()) +
-                 torch.matmul(self.W_fb, self.output.float()) +
-                 torch.randn(self.dim_reservoir).to(self.device) * self.noise_scaling)
-
-        # Update reservoir state
-        dr = (-self.r + torch.tanh(state)) / self.tau
-        self.r += dt * dr
-
-        # Compute output
-        self.output = self.step()
-
-        return self.output
-
-    @torch.no_grad()
-    def step(self):
-        return torch.matmul(self.W_out, self.r)
-
-    def reset_state(self):
-        self.r = torch.zeros(self.dim_reservoir).to(self.device)
-        self.output = torch.zeros(self.dim_output).to(self.device)
-
     def save(self, path):
         folder = os.path.split(path)[0]
         if not os.path.exists(folder):
@@ -116,7 +138,18 @@ class ForceTrainer:
                  reservoir: Reservoir,
                  alpha: float = 1.0):
         self.reservoir = reservoir
-        self.P = torch.eye(reservoir.dim_reservoir).to(reservoir.device) / alpha
+        self.P = torch.eye(reservoir.dim_reservoir, device=reservoir.device) / alpha
+
+        # Pre-allocate buffers for computations
+        self.Pr_buffer = torch.zeros(reservoir.dim_reservoir, device=reservoir.device)
+        self.outer_buffer = torch.zeros(
+            (reservoir.dim_reservoir, reservoir.dim_reservoir),
+            device=reservoir.device
+        )
+        self.error_outer_buffer = torch.zeros(
+            (reservoir.dim_output, reservoir.dim_reservoir),
+            device=reservoir.device
+        )
 
     @torch.no_grad()
     def train_step(self,
@@ -139,15 +172,22 @@ class ForceTrainer:
         # Compute error
         error_minus = output - target
 
-        # Update P matrix
+        # Update P matrix using in-place operations
         r = self.reservoir.r
-        Pr = torch.matmul(self.P, r)
-        rPr = torch.matmul(r, Pr)
+        # Compute Pr using pre-allocated buffer
+        torch.mv(self.P, r, out=self.Pr_buffer)
+        rPr = torch.dot(r, self.Pr_buffer)
         c = 1.0 / (1.0 + rPr)
-        self.P -= c * torch.outer(Pr, Pr)
 
-        # Update output weights
-        self.reservoir.W_out -= c * torch.outer(error_minus, Pr)
+        # Update P matrix in-place
+        # P -= c * torch.outer(Pr, Pr)
+        torch.outer(self.Pr_buffer, self.Pr_buffer, out=self.outer_buffer)
+        self.P.add_(self.outer_buffer, alpha=-c)
+
+        # Update output weights in-place
+        # W_out -= c * torch.outer(error_minus, Pr)
+        torch.outer(error_minus, self.Pr_buffer, out=self.error_outer_buffer)
+        self.reservoir.W_out.add_(self.error_outer_buffer, alpha=-c)
 
         # Error after update
         error_plus = self.reservoir.step()
