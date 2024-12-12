@@ -50,9 +50,8 @@ python reservoir_prediction.py --sim_id 4 --dim_reservoir 4000 --seed 42 --prop_
 wait
 sleep 360
 
-python transformer_prediction.py --sim_id 1 --seed 42 --num_encoder_layers 1 --num_decoder_layers 1 --device cuda:0 &
-python transformer_prediction.py --sim_id 2 --seed 42 --num_encoder_layers 2 --num_decoder_layers 2 --device cuda:0 &
-python transformer_prediction.py --sim_id 3 --seed 42 --num_encoder_layers 4 --num_decoder_layers 4 --device cuda:1
+python transformer_prediction.py --sim_id 1 --seed 42 --device cuda:0 &
+python transformer_prediction.py --sim_id 2 --seed 42 --device cuda:1
 
 # Record end time
 parallel_end_time=$(date +%s)

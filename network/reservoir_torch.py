@@ -193,6 +193,7 @@ class ForceTrainer:
 
         return error_minus, error_plus
 
+
 def make_dynamic_target(dim_out: int, n_periods: int, seed: Optional[int] = None):
     """
     Generates a dynamic target signal for the reservoir computing network.

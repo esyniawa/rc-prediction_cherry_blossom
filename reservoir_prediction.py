@@ -332,6 +332,7 @@ class SakuraReservoir:
 def main(save_data_path: str,
          test_cutoff: list[float],
          dim_reservoir: int,
+         num_epochs: int,
          training_set_size: float = 0.8,
          dt: float = 0.1,
          chaos_factor: float = 1.5,
@@ -375,7 +376,7 @@ def main(save_data_path: str,
     )
 
     # Train
-    sakura_rc.train(dt=dt)
+    sakura_rc.train(dt=dt, n_epochs=num_epochs)
 
     # Save model
     if save_model_path is not None:
@@ -414,6 +415,7 @@ if __name__ == "__main__":
     parser.add_argument('--chaos_factor', type=float, default=1.5)
     parser.add_argument('--noise_scaling', type=float, default=0.02)
     parser.add_argument('--training_set_size', type=float, default=0.8)
+    parser.add_argument('--num_epochs', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
 
     args = parser.parse_args()
@@ -426,6 +428,7 @@ if __name__ == "__main__":
     main(save_data_path=save_data_path,
          save_model_path=save_data_path + '/reservoir_model.pt',
          test_cutoff=cutoffs,
+         num_epochs=args.num_epochs,
          dim_reservoir=args.dim_reservoir,
          training_set_size=args.training_set_size,
          dt=0.1,
