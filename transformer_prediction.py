@@ -2,7 +2,7 @@ import torch
 import pandas as pd
 import numpy as np
 from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
-from pytorch_forecasting.data import GroupNormalizer
+from pytorch_forecasting.data import MultiNormalizer
 from pytorch_lightning.callbacks import EarlyStopping
 import pytorch_lightning as pl
 from datetime import datetime, timedelta
@@ -107,7 +107,9 @@ class SakuraTFTPredictor:
             static_reals=["lat", "lng"],
             time_varying_known_reals=["time_idx"],
             time_varying_unknown_reals=["temperature", "countdown_first", "countdown_full"],
-            target_normalizer=None,
+            target_normalizer=MultiNormalizer(
+                [GroupNormalizer(groups=["site_name"], transformation=None) for _ in range(2)]  # One for each target
+            ),
             add_relative_time_idx=True,
             add_target_scales=False,
             add_encoder_length=True,
