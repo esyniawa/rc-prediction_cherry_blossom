@@ -107,9 +107,7 @@ class SakuraTFTPredictor:
             static_reals=["lat", "lng"],
             time_varying_known_reals=["time_idx"],
             time_varying_unknown_reals=["temperature", "countdown_first", "countdown_full"],
-            target_normalizer=GroupNormalizer(
-                groups=["site_name"], transformation=None  # No normalization as data is already scaled
-            ),
+            target_normalizer=None,
             add_relative_time_idx=True,
             add_target_scales=False,
             add_encoder_length=True,
