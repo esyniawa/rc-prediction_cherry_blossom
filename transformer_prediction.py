@@ -21,6 +21,7 @@ class SakuraTransformer:
                  batch_size: int = 32,
                  num_encoder_layers: int = 3,
                  num_decoder_layers: int = 3,
+                 num_epochs: int = 5,
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
                  sim_id: int = 0,
@@ -48,7 +49,7 @@ class SakuraTransformer:
             dim_feedforward=d_model * 4,  # Standard transformer uses 4x hidden size
             dropout=dropout,
             batch_size=batch_size,
-            n_epochs=1,  # We'll control epochs externally
+            n_epochs=num_epochs,
             random_state=seed,
             force_reset=True,
             pl_trainer_kwargs={
@@ -116,37 +117,36 @@ class SakuraTransformer:
 
         return dynamic_ts, target_first_ts, target_full_ts
 
-    def train(self, n_epochs: int = 5):
+    def train(self):
         """Train the transformer on the sakura dataset"""
-        for epoch in range(n_epochs):
-            tqdm.write(f"\nEpoch {epoch + 1}/{n_epochs}")
+        tqdm.write(f"\nTraining")
 
-            # Shuffle training indices
-            train_indices = torch.randperm(len(self.train_indices)).tolist()
+        # Shuffle training indices
+        train_indices = torch.randperm(len(self.train_indices)).tolist()
 
-            # Prepare training data
-            train_series = []
-            train_targets_first = []
-            train_targets_full = []
+        # Prepare training data
+        train_series = []
+        train_targets_first = []
+        train_targets_full = []
 
-            for train_idx in tqdm(train_indices,
-                                  desc=f"Preparing data Epoch {epoch + 1}",
-                                  position=self.tqdm_bar_position):
-                series, target_first, target_full = self._prepare_sequence(train_idx)
-                train_series.append(series)
-                train_targets_first.append(target_first)
-                train_targets_full.append(target_full)
+        for train_idx in tqdm(train_indices,
+                              desc=f"Preparing data for training {self.tqdm_bar_position}",
+                              position=self.tqdm_bar_position):
+            series, target_first, target_full = self._prepare_sequence(train_idx)
+            train_series.append(series)
+            train_targets_first.append(target_first)
+            train_targets_full.append(target_full)
 
-            # Train the model
-            self.model.fit(
-                series=train_series,
-                future_covariates=None,
-                past_covariates=None,
-                val_series=None,
-                val_future_covariates=None,
-                val_past_covariates=None,
-                verbose=True
-            )
+        # Train the model
+        self.model.fit(
+            series=train_series,
+            future_covariates=None,
+            past_covariates=None,
+            val_series=None,
+            val_future_covariates=None,
+            val_past_covariates=None,
+            verbose=True
+        )
 
     def test(self, sequence_offset: float = 1.0):
         """
@@ -262,7 +262,7 @@ class SakuraTransformer:
 
 def main(save_data_path: str,
          test_cutoff: list[float],
-         hidden_size: int,
+         d_model: int,
          num_epochs: int,
          training_set_size: float = 0.8,
          num_attention_heads: int = 4,
@@ -275,6 +275,7 @@ def main(save_data_path: str,
          seed: Optional[int] = None,
          tqdm_bar_position: int = 0,
          device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+
     assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
 
     if do_plot:
@@ -293,20 +294,21 @@ def main(save_data_path: str,
 
     # Initialize transformer
     sakura_transformer = SakuraTransformer(
-        d_model=hidden_size,
+        d_model=d_model,
         n_heads=num_attention_heads,
         dropout=dropout,
         train_percentage=training_set_size,
         batch_size=batch_size,
         num_encoder_layers=num_encoder_layers,
         num_decoder_layers=num_decoder_layers,
+        num_epochs=num_epochs,
         seed=seed,
         device=device,
         sim_id=tqdm_bar_position
     )
 
     # Train
-    sakura_transformer.train(n_epochs=num_epochs)
+    sakura_transformer.train()
 
     # Save model
     if save_model_path is not None:
@@ -339,21 +341,20 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--sim_id', type=int, default=0)
-    parser.add_argument('--hidden_size', type=int, default=64)
+    parser.add_argument('--d_model', type=int, default=64)
     parser.add_argument('--seed', type=int, default=None)
-    parser.add_argument('--num_attention_heads', type=int, default=4)
+    parser.add_argument('--num_heads', type=int, default=4)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--num_encoder_layers', type=int, default=3)
-    parser.add_argument('--num_decoder_layers', type=int, default=3)
+    parser.add_argument('--num_encoder_layers', type=int, default=2)
+    parser.add_argument('--num_decoder_layers', type=int, default=2)
     parser.add_argument('--training_set_size', type=float, default=0.8)
     parser.add_argument('--num_epochs', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-
     args = parser.parse_args()
 
     # Folder
-    save_data_path = f'src_test/transformer_hidden_{args.hidden_size}/sim_id_{args.sim_id}/'
+    save_data_path = f'src_test/transformer_d{args.d_model}_h{args.num_heads}/sim_id_{args.sim_id}/'
     cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980,
                0.990]
 
@@ -362,9 +363,9 @@ if __name__ == "__main__":
          save_model_path=save_data_path + '/transformer_model.pt',
          test_cutoff=cutoffs,
          num_epochs=args.num_epochs,
-         hidden_size=args.hidden_size,
+         d_model=args.d_model,
          training_set_size=args.training_set_size,
-         num_attention_heads=args.num_attention_heads,
+         num_attention_heads=args.num_heads,
          dropout=args.dropout,
          batch_size=args.batch_size,
          num_encoder_layers=args.num_encoder_layers,
