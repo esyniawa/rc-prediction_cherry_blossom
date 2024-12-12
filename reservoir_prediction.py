@@ -18,7 +18,7 @@ class SakuraReservoir:
                  chaos_factor: float = 1.5,
                  train_percentage: float = 0.8,
                  probability_recurrent_connection: float = 0.1,
-                 noise_scaling: float = 0.025,
+                 initial_noise: float = 0.025,  # renamed from noise_scaling
                  alpha_FORCE: float = 1.0,
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
@@ -31,6 +31,7 @@ class SakuraReservoir:
         self.train_percentage = train_percentage
         self.seed = seed
         self.tqdm_bar_position = sim_id
+        self.initial_noise = initial_noise
 
         # Load and process data
         self.df, self.scalers = load_sakura_data()
@@ -42,21 +43,105 @@ class SakuraReservoir:
             dim_output=2,  # countdown_first, countdown_full
             tau=tau,
             probability_recurrent_connection=probability_recurrent_connection,
-            noise_scaling=noise_scaling,
+            noise_scaling=initial_noise,
             chaos_factor=chaos_factor,
             device=device
         )
-        # save noise scaling to switch it on and off between training and testing
-        self.noise_scaling = noise_scaling
-
-        if load_pretrained_model is not None:
-            self.reservoir.load(load_pretrained_model)
 
         # Initialize trainer
         self.trainer = ForceTrainer(self.reservoir, alpha=alpha_FORCE)
 
         # Split data
         self.train_indices, self.test_indices = self._split_data()
+
+    def _calculate_noise_schedule(self, sequence_length: int, epoch: int, total_epochs: int) -> torch.Tensor:
+        """
+        Calculate noise schedule for a sequence, implementing noise annealing.
+        The noise decreases linearly from initial_noise to 0 over the sequence length.
+        For later epochs, the starting noise is also reduced.
+
+        Args:
+            sequence_length: Length of the sequence
+            epoch: Current epoch number (0-based)
+            total_epochs: Total number of epochs
+
+        Returns:
+            torch.Tensor: Noise schedule for the sequence
+        """
+        # Calculate epoch-based initial noise (decreases with epochs)
+        epoch_factor = 1 - (epoch / total_epochs)
+        start_noise = self.initial_noise * epoch_factor
+
+        # Create linear schedule from start_noise to 0
+        noise_schedule = torch.linspace(start_noise, 0, sequence_length)
+        return noise_schedule.to(self.device)
+
+    def train(self, n_epochs: int = 5, dt: float = 0.1):
+        """
+        Train the reservoir on the sakura dataset for multiple epochs
+
+        Args:
+            n_epochs: Number of training epochs
+            dt: Time step for the reservoir
+        """
+        for epoch in range(n_epochs):
+            tqdm.write(f"\nEpoch {epoch + 1}/{n_epochs}")
+
+            # Shuffle training indices at the start of each epoch
+            train_indices = torch.randperm(len(self.train_indices)).tolist()
+
+            for train_idx in tqdm(train_indices,
+                                  desc=f"Training {self.tqdm_bar_position} Epoch {epoch + 1}",
+                                  position=self.tqdm_bar_position):
+                inputs, targets, seq_length = self._prepare_sequence(train_idx)
+                inputs = inputs.to(self.device)
+                targets = targets.to(self.device)
+
+                # Calculate noise schedule for this sequence
+                noise_schedule = self._calculate_noise_schedule(seq_length, epoch, n_epochs)
+
+                # Reset reservoir state
+                self.reservoir.reset_state()
+
+                # Train sequence
+                for t in range(seq_length):
+                    # Update noise scaling for this timestep
+                    self.reservoir.noise_scaling = noise_schedule[t].item()
+
+                    error_minus, error_plus = self.trainer.train_step(
+                        inputs[t],
+                        targets[t],
+                        dt=dt
+                    )
+
+    def _calculate_training_error(self, dt: float):
+        """Calculate and report average training error across all training sequences"""
+        total_error = 0.0
+        total_steps = 0
+
+        self.reservoir.noise_scaling = 0.0  # Turn off noise for error calculation
+
+        for train_idx in self.train_indices:
+            inputs, targets, seq_length = self._prepare_sequence(train_idx)
+            inputs = inputs.to(self.device)
+            targets = targets.to(self.device)
+
+            self.reservoir.reset_state()
+
+            sequence_error = 0.0
+            for t in range(seq_length):
+                output = self.reservoir.forward(inputs[t], dt=dt)
+                error = torch.mean((output - targets[t]) ** 2)
+                sequence_error += error.item()
+
+            total_error += sequence_error
+            total_steps += seq_length
+
+        avg_error = total_error / total_steps
+        tqdm.write(f"Average training error: {avg_error:.6f}")
+
+        # Restore initial noise setting
+        self.reservoir.noise_scaling = self.initial_noise
 
     def _split_data(self) -> Tuple[List[int], List[int]]:
         """Split data into training and testing sets"""
@@ -108,28 +193,6 @@ class SakuraReservoir:
             unscaled_data = scaler.inverse_transform(scaled_data)
 
         return unscaled_data
-
-    def train(self, dt: float = 0.1):
-        """Train the reservoir on the sakura dataset"""
-        # set noise scaling for training
-        if not self.reservoir.noise_scaling:
-            self.reservoir.noise_scaling = self.noise_scaling
-
-        for train_idx in tqdm(self.train_indices, desc=f"Training {self.tqdm_bar_position}", position=self.tqdm_bar_position):
-            inputs, targets, seq_length = self._prepare_sequence(train_idx)
-            inputs = inputs.to(self.device)
-            targets = targets.to(self.device)
-
-            # Reset reservoir state
-            self.reservoir.reset_state()
-
-            # Train sequence
-            for t in range(seq_length):
-                error_minus, error_plus = self.trainer.train_step(
-                    inputs[t],
-                    targets[t],
-                    dt=dt
-                )
 
     def test(self, dt: float = 0.1, sequence_offset: float = 1.0):
         """
@@ -301,7 +364,7 @@ def main(save_data_path: str,
         tau=10.0,
         chaos_factor=chaos_factor,
         train_percentage=training_set_size,
-        noise_scaling=noise_scaling,
+        initial_noise=noise_scaling,
         alpha_FORCE=alpha,
         probability_recurrent_connection=probability_recurrent_connection,
         seed=seed,
