@@ -300,7 +300,7 @@ def main(save_data_path: str,
          dropout: float = 0.1,
          save_model_path: Optional[str] = None,
          do_plot: bool = True,
-         device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
 
     import os
     import json
@@ -314,7 +314,8 @@ def main(save_data_path: str,
         max_encoder_length=max_encoder_length,
         hidden_size=hidden_layer_size,
         attention_head_size=head_size,
-        dropout=dropout
+        dropout=dropout,
+        device=device
     )
 
     # Train model
@@ -349,6 +350,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_encoder_length', type=int, default=0)
     parser.add_argument('--hidden_layer_size', type=int, default=64)
     parser.add_argument('--num_epochs', type=int, default=5)
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
 
     save_data_path = f'src_test/transformer_h{args.head_size}_max_enc{args.max_encoder_length}/sim_id_{args.sim_id}/'
@@ -362,4 +364,5 @@ if __name__ == "__main__":
          head_size=args.head_size,
          num_epochs=args.num_epochs,
          dropout=0.1,
-         do_plot=True)
+         do_plot=True,
+         device=args.device)
