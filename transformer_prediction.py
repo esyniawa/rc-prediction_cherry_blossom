@@ -1,68 +1,74 @@
 import torch
-import pandas as pd
 import numpy as np
-from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
-from pytorch_forecasting.data import MultiNormalizer, GroupNormalizer
-from pytorch_lightning.callbacks import EarlyStopping
-import pytorch_lightning as pl
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
-from sklearn.model_selection import train_test_split
-from sakura_data import load_sakura_data
-
-import torch
 import pandas as pd
-import numpy as np
-from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
-from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
-from pytorch_lightning.callbacks import EarlyStopping
-import pytorch_lightning as pl
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple
+from darts import TimeSeries
+from darts.models import TransformerModel
+from darts.metrics import mae
 from sklearn.model_selection import train_test_split
-from sakura_data import load_sakura_data
+from typing import Tuple, List, Optional
+from tqdm import tqdm
+import datetime
+import os
+import json
 
 
-class SakuraTFTPredictor:
-    def __init__(
-            self,
-            train_percentage: float = 0.8,
-            max_prediction_length: int = 30,
-            max_encoder_length: int = 90,
-            seed: Optional[int] = None,
-            learning_rate: float = 0.001,
-            hidden_size: int = 64,
-            attention_head_size: int = 4,
-            dropout: float = 0.1,
-            hidden_continuous_size: int = 32,
-            device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    ):
-        """Initialize the Sakura TFT Predictor"""
-        print(f"PyTorch version: {torch.__version__} | Using device: {device}")
+class SakuraTransformer:
+    def __init__(self,
+                 d_model: int = 64,
+                 n_heads: int = 4,
+                 dropout: float = 0.1,
+                 train_percentage: float = 0.8,
+                 batch_size: int = 32,
+                 num_encoder_layers: int = 3,
+                 num_decoder_layers: int = 3,
+                 seed: Optional[int] = None,
+                 load_pretrained_model: Optional[str] = None,
+                 sim_id: int = 0,
+                 device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+        """Initialize the Sakura Transformer"""
+        tqdm.write(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
         self.train_percentage = train_percentage
         self.seed = seed
-        self.max_prediction_length = max_prediction_length
-        self.max_encoder_length = max_encoder_length
+        self.tqdm_bar_position = sim_id
+        self.batch_size = batch_size
 
-        # Model hyperparameters
-        self.learning_rate = learning_rate
-        self.hidden_size = hidden_size
-        self.attention_head_size = attention_head_size
-        self.dropout = dropout
-        self.hidden_continuous_size = hidden_continuous_size
+        # Load and process data
+        self.df, self.scalers = self._load_sakura_data()
 
-        # Load data and scalers
-        self.df, self.scalers = load_sakura_data()
+        # Initialize transformer model
+        self.model = TransformerModel(
+            input_chunk_length=30,
+            output_chunk_length=1,
+            d_model=d_model,
+            nhead=n_heads,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dim_feedforward=d_model * 4,  # Standard transformer uses 4x hidden size
+            dropout=dropout,
+            batch_size=batch_size,
+            n_epochs=1,  # We'll control epochs externally
+            random_state=seed,
+            force_reset=True,
+            pl_trainer_kwargs={
+                "accelerator": "gpu" if str(device) == "cuda" else "cpu",
+                "devices": 1
+            }
+        )
 
-        # Split data into train and test sets
+        if load_pretrained_model is not None:
+            self.model.load(load_pretrained_model)
+
+        # Split data
         self.train_indices, self.test_indices = self._split_data()
 
-        # Process data for TFT format
-        self._prepare_data()
+    def _load_sakura_data(self) -> Tuple[pd.DataFrame, dict]:
+        """Load the pre-processed and scaled sakura data"""
+        from sakura_data import load_sakura_data
+        return load_sakura_data()
 
-    def _split_data(self) -> Tuple[list, list]:
+    def _split_data(self) -> Tuple[List[int], List[int]]:
         """Split data into training and testing sets"""
         all_indices = np.arange(len(self.df))
         train_idx, test_idx = train_test_split(
@@ -72,214 +78,152 @@ class SakuraTFTPredictor:
         )
         return train_idx.tolist(), test_idx.tolist()
 
-    def _prepare_data(self):
-        """Transform data into format suitable for TFT"""
-        processed_data = []
+    def _prepare_sequence(self, idx: int) -> Tuple[TimeSeries, TimeSeries, TimeSeries]:
+        """Prepare input and target sequences for a single example"""
+        row = self.df.iloc[idx]
 
-        for idx, row in self.df.iterrows():
-            sequence_length = len(row['temps_to_full'])
+        # Static features (lat, lng)
+        static_features = pd.DataFrame({
+            'lat': [row['lat']],
+            'lng': [row['lng']]
+        })
 
-            # Create a single entry per sequence with all time steps
-            processed_data.append({
-                'site_name': row['site_name'],
-                'year': row['year'],
-                'lat': row['lat'],
-                'lng': row['lng'],
-                'sequence_id': idx,
-                'sequence_length': sequence_length,
-                'time_idx': np.arange(sequence_length),
-                'temperature': row['temps_to_full'],
-                'countdown_first': row['countdown_to_first'],
-                'countdown_full': row['countdown_to_full']
-            })
+        # Create time index
+        start_date = row['data_start_date']
+        dates = pd.date_range(start=start_date, periods=len(row['temps_to_full']), freq='D')
 
-        # Convert to DataFrame with proper time series structure
-        flat_data = []
-        for row in processed_data:
-            for t in range(row['sequence_length']):
-                flat_data.append({
-                    'sequence_id': row['sequence_id'],
-                    'time_idx': t,
-                    'site_name': row['site_name'],
-                    'year': row['year'],
-                    'lat': row['lat'],
-                    'lng': row['lng'],
-                    'temperature': row['temperature'][t],
-                    'countdown_first': row['countdown_first'][t],
-                    'countdown_full': row['countdown_full'][t]
-                })
+        # Dynamic features (temperature)
+        dynamic_features = pd.DataFrame({
+            'temperature': row['temps_to_full']
+        }, index=dates)
 
-        self.processed_df = pd.DataFrame(flat_data)
+        # Target series
+        target_first = pd.DataFrame({
+            'countdown_first': row['countdown_to_first']
+        }, index=dates)
 
-        # Create training dataset using only training indices
-        train_mask = self.processed_df['sequence_id'].isin(self.train_indices)
-        self.training = TimeSeriesDataSet(
-            self.processed_df[train_mask],
-            time_idx="time_idx",
-            target=["countdown_first", "countdown_full"],
-            group_ids=["sequence_id"],  # Group by unique sequence
-            static_categoricals=["site_name"],
-            static_reals=["lat", "lng", "year"],
-            time_varying_unknown_reals=["temperature", "countdown_first", "countdown_full"],
-            max_encoder_length=self.max_encoder_length,
-            max_prediction_length=self.max_prediction_length,
-            min_encoder_length=1,
-            min_prediction_length=1,
-            target_normalizer=MultiNormalizer(
-                [GroupNormalizer(groups=["site_name"], transformation=None) for _ in range(2)]
-            ),
-            add_relative_time_idx=True,
-            add_target_scales=False,
-            add_encoder_length=True
-        )
+        target_full = pd.DataFrame({
+            'countdown_full': row['countdown_to_full']
+        }, index=dates)
 
-        # Create data loaders
-        self.train_dataloader = self.training.to_dataloader(
-            train=True,
-            batch_size=64,
-            num_workers=0
-        )
+        # Convert to Darts TimeSeries
+        dynamic_ts = TimeSeries.from_dataframe(dynamic_features)
+        target_first_ts = TimeSeries.from_dataframe(target_first)
+        target_full_ts = TimeSeries.from_dataframe(target_full)
 
-        # Initialize TFT model
-        self.tft = TemporalFusionTransformer.from_dataset(
-            self.training,
-            learning_rate=self.learning_rate,
-            hidden_size=self.hidden_size,
-            attention_head_size=self.attention_head_size,
-            dropout=self.dropout,
-            hidden_continuous_size=self.hidden_continuous_size,
-            loss=torch.nn.MSELoss(),
-            log_interval=10,
-            reduce_on_plateau_patience=4,
-        )
+        # Add static covariates
+        dynamic_ts = dynamic_ts.with_static_covariates(static_features)
 
-        # Move model to device
-        self.tft = self.tft.to(self.device)
+        return dynamic_ts, target_first_ts, target_full_ts
 
-    def train(self, max_epochs: int = 50):
-        """Train the TFT model"""
-        trainer = pl.Trainer(
-            max_epochs=max_epochs,
-            accelerator=self.device,
-            enable_model_summary=True,
-            gradient_clip_val=0.1,
-            callbacks=[
-                EarlyStopping(
-                    monitor="train_loss",
-                    min_delta=1e-4,
-                    patience=10,
-                    verbose=False,
-                    mode="min"
-                )
-            ],
-        )
+    def train(self, n_epochs: int = 5):
+        """Train the transformer on the sakura dataset"""
+        for epoch in range(n_epochs):
+            tqdm.write(f"\nEpoch {epoch + 1}/{n_epochs}")
 
-        trainer.fit(
-            self.tft,
-            train_dataloaders=self.train_dataloader
-        )
+            # Shuffle training indices
+            train_indices = torch.randperm(len(self.train_indices)).tolist()
+
+            # Prepare training data
+            train_series = []
+            train_targets_first = []
+            train_targets_full = []
+
+            for train_idx in tqdm(train_indices,
+                                  desc=f"Preparing data Epoch {epoch + 1}",
+                                  position=self.tqdm_bar_position):
+                series, target_first, target_full = self._prepare_sequence(train_idx)
+                train_series.append(series)
+                train_targets_first.append(target_first)
+                train_targets_full.append(target_full)
+
+            # Train the model
+            self.model.fit(
+                series=train_series,
+                future_covariates=None,
+                past_covariates=None,
+                val_series=None,
+                val_future_covariates=None,
+                val_past_covariates=None,
+                verbose=True
+            )
 
     def test(self, sequence_offset: float = 1.0):
-        """Test the model's predictions using partial sequences"""
-        self.tft.eval()
+        """
+        Test the transformer on the test set
+
+        Args:
+            sequence_offset: Fraction of the sequence to predict (0.0 to 1.0)
+        """
         predictions = []
 
-        for test_idx in self.test_indices:
-            # Get original data row
+        tqdm.write(f"\nTesting on {len(self.test_indices)} sequences...")
+
+        for test_idx in tqdm(self.test_indices,
+                             desc=f"Testing {self.tqdm_bar_position}",
+                             position=self.tqdm_bar_position):
+            # Get metadata
             row = self.df.iloc[test_idx]
 
-            # Calculate cutoff point
-            full_length = len(row['temps_to_full'])
-            cutoff = int(full_length * sequence_offset)
+            # Prepare sequence
+            series, target_first, target_full = self._prepare_sequence(test_idx)
 
-            # Create test dataset with truncated sequence
-            test_data = []
-            for t in range(cutoff):
-                test_data.append({
-                    'sequence_id': test_idx,
-                    'time_idx': t,
-                    'site_name': row['site_name'],
-                    'year': row['year'],
-                    'lat': row['lat'],
-                    'lng': row['lng'],
-                    'temperature': row['temps_to_full'][t],
-                    'countdown_first': row['countdown_to_first'][t],
-                    'countdown_full': row['countdown_to_full'][t]
-                })
-
-            # Create test TimeSeriesDataSet
-            test_df = pd.DataFrame(test_data)
-            test_dataset = TimeSeriesDataSet.from_dataset(
-                self.training,
-                test_df,
-                predict=True,
-                stop_randomization=True
-            )
-            test_dataloader = test_dataset.to_dataloader(train=False, batch_size=1, num_workers=0)
+            # Calculate sequence cutoff point
+            cutoff = int(len(series) * sequence_offset)
 
             # Generate predictions
-            raw_predictions = self.tft.predict(test_dataloader)
+            pred_first = self.model.predict(
+                n=cutoff,
+                series=series[:cutoff],
+                future_covariates=None,
+                past_covariates=None
+            )
 
-            # Get the predictions
-            pred_first = raw_predictions[0, :, 0].numpy()
-            pred_full = raw_predictions[0, :, 1].numpy()
-
-            # Inverse transform predictions
-            unscaled_pred_first = self.scalers['countdown_to_first'].inverse_transform(
-                pred_first.reshape(-1, 1)
-            ).flatten()
-            unscaled_pred_full = self.scalers['countdown_to_full'].inverse_transform(
-                pred_full.reshape(-1, 1)
-            ).flatten()
-
-            # Get true values for comparison
-            true_first = row['countdown_to_first'][:cutoff]
-            true_full = row['countdown_to_full'][:cutoff]
-
-            # Inverse transform true values
-            unscaled_true_first = self.scalers['countdown_to_first'].inverse_transform(
-                np.array(true_first).reshape(-1, 1)
-            ).flatten()
-            unscaled_true_full = self.scalers['countdown_to_full'].inverse_transform(
-                np.array(true_full).reshape(-1, 1)
-            ).flatten()
+            pred_full = self.model.predict(
+                n=cutoff,
+                series=series[:cutoff],
+                future_covariates=None,
+                past_covariates=None
+            )
 
             # Calculate errors
-            mae_first = np.mean(np.abs(unscaled_pred_first - unscaled_true_first))
-            mae_full = np.mean(np.abs(unscaled_pred_full - unscaled_true_full))
+            mae_first = mae(target_first[:cutoff], pred_first)
+            mae_full = mae(target_full[:cutoff], pred_full)
 
-            # Store predictions with metadata
+            # Store results with metadata
             predictions.append({
                 'site_name': row['site_name'],
                 'year': row['year'],
                 'start_date': row['data_start_date'],
                 'date_first': row['first_bloom'],
                 'date_full': row['full_bloom'],
-                'true_first_sequence': unscaled_true_first.tolist(),
-                'true_full_sequence': unscaled_true_full.tolist(),
-                'pred_first_sequence': unscaled_pred_first.tolist(),
-                'pred_full_sequence': unscaled_pred_full.tolist(),
+                'true_first_sequence': target_first[:cutoff].values().flatten().tolist(),
+                'true_full_sequence': target_full[:cutoff].values().flatten().tolist(),
+                'pred_first_sequence': pred_first.values().flatten().tolist(),
+                'pred_full_sequence': pred_full.values().flatten().tolist(),
                 'cutoff': cutoff,
-                'cutoff_date': row['data_start_date'] + timedelta(days=cutoff),
-                'pred_first_bloom_date': row['data_start_date'] + timedelta(days=cutoff) +
-                                         timedelta(days=int(unscaled_pred_first[-1])),
-                'pred_full_bloom_date': row['data_start_date'] + timedelta(days=cutoff) +
-                                        timedelta(days=int(unscaled_pred_full[-1])),
-                'full_length': full_length,
+                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
+                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
+                    days=float(pred_first.last_value())),
+                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
+                    days=float(pred_full.last_value())),
+                'full_length': len(series),
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
 
+        # Convert predictions to DataFrame
         predictions_df = pd.DataFrame(predictions)
 
         # Calculate overall metrics
         avg_mae_first = predictions_df['mae_first'].mean()
         avg_mae_full = predictions_df['mae_full'].mean()
 
-        print(f"MAE (days):")
-        print(f"  First bloom: {avg_mae_first:.2f}")
-        print(f"  Full bloom: {avg_mae_full:.2f}")
-        print(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
+        # Print summary statistics
+        tqdm.write(f"\nMAE (days):")
+        tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
+        tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
+        tqdm.write(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
 
         metrics = {
             'mae_first': float(avg_mae_first),
@@ -288,63 +232,106 @@ class SakuraTFTPredictor:
 
         return predictions_df, metrics
 
-    def save_model(self, path: str):
-        """Save the trained model"""
-        torch.save(self.tft.state_dict(), path)
+    def save_model(self, save_path: str):
+        """Save the transformer model"""
+        self.model.save(save_path)
 
-    def load_model(self, path: str):
-        """Load a trained model"""
-        self.tft.load_state_dict(torch.load(path))
+    def load_model(self, load_path: str):
+        """Load a saved transformer model"""
+        self.model.load(load_path)
+
+    def dump_parameters(self, save_path: Optional[str] = None) -> dict:
+        """Get model parameters as a dictionary"""
+        params = {
+            'hidden_size': self.model.d_model,
+            'num_attention_heads': self.model.nhead,
+            'dropout': self.model.dropout,
+            'num_encoder_layers': self.model.num_encoder_layers,
+            'num_decoder_layers': self.model.num_decoder_layers,
+            'batch_size': self.batch_size,
+            'device': str(self.device)
+        }
+
+        if save_path is not None:
+            os.makedirs(save_path, exist_ok=True)
+            with open(os.path.join(save_path, 'parameters.json'), 'w') as f:
+                json.dump(params, f, indent=4)
+
+        return params
 
 
 def main(save_data_path: str,
          test_cutoff: list[float],
-         hidden_layer_size: int = 64,
+         hidden_size: int,
+         num_epochs: int,
          training_set_size: float = 0.8,
-         max_encoder_length: int = 10,
-         head_size: int = 8,
-         num_epochs: int = 5,
+         num_attention_heads: int = 4,
          dropout: float = 0.1,
+         batch_size: int = 32,
+         num_encoder_layers: int = 3,
+         num_decoder_layers: int = 3,
          save_model_path: Optional[str] = None,
          do_plot: bool = True,
-         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
+         seed: Optional[int] = None,
+         tqdm_bar_position: int = 0,
+         device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+    assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
 
-    import os
-    import json
+    if do_plot:
+        from utils import plot_mae_results
 
-    from utils import plot_mae_results
+    # Create save path
+    if save_data_path[-1] != '/':
+        save_data_path += '/'
+    if not os.path.exists(save_data_path):
+        os.makedirs(save_data_path)
 
-    # Initialize predictor
-    predictor = SakuraTFTPredictor(
-        train_percentage=training_set_size,
-        max_prediction_length=30,
-        max_encoder_length=max_encoder_length,
-        hidden_size=hidden_layer_size,
-        attention_head_size=head_size,
+    # Set random seed
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+    # Initialize transformer
+    sakura_transformer = SakuraTransformer(
+        d_model=hidden_size,
+        n_heads=num_attention_heads,
         dropout=dropout,
-        device=device
+        train_percentage=training_set_size,
+        batch_size=batch_size,
+        num_encoder_layers=num_encoder_layers,
+        num_decoder_layers=num_decoder_layers,
+        seed=seed,
+        device=device,
+        sim_id=tqdm_bar_position
     )
 
-    # Train model
-    predictor.train(max_epochs=num_epochs)
+    # Train
+    sakura_transformer.train(n_epochs=num_epochs)
 
-    # Test with different sequence cutoffs
+    # Save model
+    if save_model_path is not None:
+        sakura_transformer.save_model(save_model_path)
+
+    # Save parameters
+    sakura_transformer.dump_parameters(save_path=save_data_path)
+
+    # Test
     for cutoff in test_cutoff:
-        print(f"\nTesting with sequence_offset = {cutoff}")
-        predictions_df, metrics = predictor.test(sequence_offset=cutoff)
+        predictions_df, metrics = sakura_transformer.test(sequence_offset=cutoff)
 
-        # save predictions
+        # Save predictions
         folder = save_data_path + f'test_cutoff_{cutoff}/'
         if not os.path.exists(folder):
             os.makedirs(folder)
 
         predictions_df.to_parquet(folder + 'predictions.parquet')
+
+        # Save metrics
+        with open(folder + 'metrics.json', 'w') as f:
+            json.dump(metrics, f)
+
         if do_plot:
             plot_mae_results(predictions_df=predictions_df, save_path=folder + 'mae')
-
-    # Save model if needed
-    if save_model_path is not None:
-        predictor.save_model(save_model_path + 'sakura_tft_model.pth')
 
 
 if __name__ == "__main__":
@@ -352,24 +339,37 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--sim_id', type=int, default=0)
-    parser.add_argument('--head_size', type=int, default=8)
+    parser.add_argument('--hidden_size', type=int, default=64)
+    parser.add_argument('--seed', type=int, default=None)
+    parser.add_argument('--num_attention_heads', type=int, default=4)
+    parser.add_argument('--dropout', type=float, default=0.1)
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--num_encoder_layers', type=int, default=3)
+    parser.add_argument('--num_decoder_layers', type=int, default=3)
     parser.add_argument('--training_set_size', type=float, default=0.8)
-    parser.add_argument('--max_encoder_length', type=int, default=8)
-    parser.add_argument('--hidden_layer_size', type=int, default=64)
     parser.add_argument('--num_epochs', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+
     args = parser.parse_args()
 
-    save_data_path = f'src_test/transformer_h{args.head_size}_max_enc{args.max_encoder_length}/sim_id_{args.sim_id}/'
-    cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980, 0.990,]
+    # Folder
+    save_data_path = f'src_test/transformer_hidden_{args.hidden_size}/sim_id_{args.sim_id}/'
+    cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980,
+               0.990]
 
+    # Run model
     main(save_data_path=save_data_path,
+         save_model_path=save_data_path + '/transformer_model.pt',
          test_cutoff=cutoffs,
-         hidden_layer_size=args.hidden_layer_size,
-         training_set_size=args.training_set_size,
-         max_encoder_length=args.max_encoder_length,
-         head_size=args.head_size,
          num_epochs=args.num_epochs,
-         dropout=0.1,
+         hidden_size=args.hidden_size,
+         training_set_size=args.training_set_size,
+         num_attention_heads=args.num_attention_heads,
+         dropout=args.dropout,
+         batch_size=args.batch_size,
+         num_encoder_layers=args.num_encoder_layers,
+         num_decoder_layers=args.num_decoder_layers,
+         seed=args.seed,
          do_plot=True,
-         device=args.device)
+         device=torch.device(args.device),
+         tqdm_bar_position=args.sim_id)
