@@ -60,15 +60,14 @@ class Reservoir(nn.Module):
         input_signal = input_signal.to(self.device).view(self.dim_input)
 
         # In-place computation of total input to reservoir neurons using pre-allocated buffer
-        # First, compute W * r
-        torch.mm(self.W.unsqueeze(0), self.r.unsqueeze(1), out=self.state_buffer.unsqueeze(1))
-        self.state_buffer = self.state_buffer.squeeze()
+        # First, compute W * r using mv (matrix-vector multiplication)
+        torch.mv(self.W, self.r, out=self.state_buffer)
 
-        # Add W_in * input
-        self.state_buffer.addmm_(self.W_in, input_signal.unsqueeze(1).float(), beta=1.0, alpha=1.0)
+        # Add W_in * input using mv
+        self.state_buffer.addmv_(self.W_in, input_signal.float())
 
-        # Add W_fb * output
-        self.state_buffer.addmm_(self.W_fb, self.output.unsqueeze(1).float(), beta=1.0, alpha=1.0)
+        # Add W_fb * output using mv
+        self.state_buffer.addmv_(self.W_fb, self.output.float())
 
         # Add noise in-place
         if self.noise_scaling > 0:
@@ -193,7 +192,6 @@ class ForceTrainer:
         error_plus = self.reservoir.step()
 
         return error_minus, error_plus
-
 
 def make_dynamic_target(dim_out: int, n_periods: int, seed: Optional[int] = None):
     """
