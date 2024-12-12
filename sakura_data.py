@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, MaxAbsScaler
 from typing import Union, Type, Optional, Literal
 
+from config import scalers_config
+
 
 def parse_date(date_str: str, separator: str = ':'):
     day, month = map(int, date_str.split(separator))
@@ -312,7 +314,7 @@ def process_data(temp_df: pd.DataFrame,
 
 def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
                        drop_na: bool = True,
-                       scale_data: float | None = 1.,
+                       scale_data: bool = True,
                        file_path: str | None = 'src_training/training_data.parquet') -> (pd.DataFrame, dict):
 
     # Load datasets
@@ -335,10 +337,14 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
         result_df = result_df.dropna()
 
     scalers = {}
-    if scale_data is not None:
-        # TODO: Change list into dict to change the scaler for each column
-        for column in ['countdown_to_first', 'countdown_to_full', 'temps_to_first', 'temps_to_full', 'lat', 'lng']:
-            result_df, scalers[column] = scale_column(df=result_df, column_name=column)
+    if scale_data:
+        for column, config in scalers_config.items():
+            result_df, scalers[column] = scale_column(
+                df=result_df,
+                column_name=config['column_name'],
+                scaler_type=config['scaler_type'],
+                scaler_kwargs=config['scaler_kwargs']
+            )
 
     print('Saving data...')
     if file_path is not None:
