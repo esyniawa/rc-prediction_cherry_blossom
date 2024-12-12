@@ -2,7 +2,19 @@ import torch
 import pandas as pd
 import numpy as np
 from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
-from pytorch_forecasting.data import MultiNormalizer
+from pytorch_forecasting.data import MultiNormalizer, GroupNormalizer
+from pytorch_lightning.callbacks import EarlyStopping
+import pytorch_lightning as pl
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Tuple
+from sklearn.model_selection import train_test_split
+from sakura_data import load_sakura_data
+
+import torch
+import pandas as pd
+import numpy as np
+from pytorch_forecasting import TemporalFusionTransformer, TimeSeriesDataSet
+from pytorch_forecasting.data import GroupNormalizer, MultiNormalizer
 from pytorch_lightning.callbacks import EarlyStopping
 import pytorch_lightning as pl
 from datetime import datetime, timedelta
@@ -65,54 +77,60 @@ class SakuraTFTPredictor:
         processed_data = []
 
         for idx, row in self.df.iterrows():
-            # Get base dates and sequences
-            start_date = pd.to_datetime(row['data_start_date'])
-            temps = row['temps_to_full']
-            countdown_first = row['countdown_to_first']
-            countdown_full = row['countdown_to_full']
+            sequence_length = len(row['temps_to_full'])
 
-            # Create time series for each day
-            for i in range(len(temps)):
-                current_date = start_date + timedelta(days=i)
+            # Create a single entry per sequence with all time steps
+            processed_data.append({
+                'site_name': row['site_name'],
+                'year': row['year'],
+                'lat': row['lat'],
+                'lng': row['lng'],
+                'sequence_id': idx,
+                'sequence_length': sequence_length,
+                'time_idx': np.arange(sequence_length),
+                'temperature': row['temps_to_full'],
+                'countdown_first': row['countdown_to_first'],
+                'countdown_full': row['countdown_to_full']
+            })
 
-                processed_data.append({
-                    'time_idx': i,
+        # Convert to DataFrame with proper time series structure
+        flat_data = []
+        for row in processed_data:
+            for t in range(row['sequence_length']):
+                flat_data.append({
+                    'sequence_id': row['sequence_id'],
+                    'time_idx': t,
                     'site_name': row['site_name'],
                     'year': row['year'],
-                    'date': current_date,
                     'lat': row['lat'],
                     'lng': row['lng'],
-                    'temperature': temps[i],
-                    'countdown_first': countdown_first[i] if i < len(countdown_first) else None,
-                    'countdown_full': countdown_full[i] if i < len(countdown_full) else None,
-                    'sequence_length': len(temps),
-                    'data_index': idx  # Store original dataframe index
+                    'temperature': row['temperature'][t],
+                    'countdown_first': row['countdown_first'][t],
+                    'countdown_full': row['countdown_full'][t]
                 })
 
-        # Convert to DataFrame
-        self.processed_df = pd.DataFrame(processed_data)
+        self.processed_df = pd.DataFrame(flat_data)
 
         # Create training dataset using only training indices
-        train_mask = self.processed_df['data_index'].isin(self.train_indices)
+        train_mask = self.processed_df['sequence_id'].isin(self.train_indices)
         self.training = TimeSeriesDataSet(
             self.processed_df[train_mask],
             time_idx="time_idx",
             target=["countdown_first", "countdown_full"],
-            group_ids=["site_name", "year"],
-            min_encoder_length=self.max_encoder_length // 2,
-            max_encoder_length=self.max_encoder_length,
-            min_prediction_length=1,
-            max_prediction_length=self.max_prediction_length,
+            group_ids=["sequence_id"],  # Group by unique sequence
             static_categoricals=["site_name"],
-            static_reals=["lat", "lng"],
-            time_varying_known_reals=["time_idx"],
+            static_reals=["lat", "lng", "year"],
             time_varying_unknown_reals=["temperature", "countdown_first", "countdown_full"],
+            max_encoder_length=self.max_encoder_length,
+            max_prediction_length=self.max_prediction_length,
+            min_encoder_length=1,
+            min_prediction_length=1,
             target_normalizer=MultiNormalizer(
-                [GroupNormalizer(groups=["site_name"], transformation=None) for _ in range(2)]  # One for each target
+                [GroupNormalizer(groups=["site_name"], transformation=None) for _ in range(2)]
             ),
             add_relative_time_idx=True,
             add_target_scales=False,
-            add_encoder_length=True,
+            add_encoder_length=True
         )
 
         # Create data loaders
@@ -140,8 +158,6 @@ class SakuraTFTPredictor:
 
     def train(self, max_epochs: int = 50):
         """Train the TFT model"""
-
-        # Create trainer
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             accelerator=self.device,
@@ -149,7 +165,7 @@ class SakuraTFTPredictor:
             gradient_clip_val=0.1,
             callbacks=[
                 EarlyStopping(
-                    monitor="train_loss",  # Using train_loss since we don't have validation set
+                    monitor="train_loss",
                     min_delta=1e-4,
                     patience=10,
                     verbose=False,
@@ -158,17 +174,13 @@ class SakuraTFTPredictor:
             ],
         )
 
-        # Fit model
         trainer.fit(
             self.tft,
             train_dataloaders=self.train_dataloader
         )
 
     def test(self, sequence_offset: float = 1.0):
-        """
-        Test the model's predictions using partial sequences
-        :param sequence_offset: Fraction of the sequence to use (0.0 to 1.0)
-        """
+        """Test the model's predictions using partial sequences"""
         self.tft.eval()
         predictions = []
 
@@ -182,20 +194,17 @@ class SakuraTFTPredictor:
 
             # Create test dataset with truncated sequence
             test_data = []
-            start_date = pd.to_datetime(row['data_start_date'])
-
-            for i in range(cutoff):
-                current_date = start_date + timedelta(days=i)
+            for t in range(cutoff):
                 test_data.append({
-                    'time_idx': i,
+                    'sequence_id': test_idx,
+                    'time_idx': t,
                     'site_name': row['site_name'],
                     'year': row['year'],
-                    'date': current_date,
                     'lat': row['lat'],
                     'lng': row['lng'],
-                    'temperature': row['temps_to_full'][i],
-                    'countdown_first': row['countdown_to_first'][i] if i < len(row['countdown_to_first']) else None,
-                    'countdown_full': row['countdown_to_full'][i] if i < len(row['countdown_to_full']) else None,
+                    'temperature': row['temps_to_full'][t],
+                    'countdown_first': row['countdown_to_first'][t],
+                    'countdown_full': row['countdown_to_full'][t]
                 })
 
             # Create test TimeSeriesDataSet
@@ -212,8 +221,8 @@ class SakuraTFTPredictor:
             raw_predictions = self.tft.predict(test_dataloader)
 
             # Get the predictions
-            pred_first = raw_predictions[0, :, 0].numpy()  # First bloom predictions
-            pred_full = raw_predictions[0, :, 1].numpy()  # Full bloom predictions
+            pred_first = raw_predictions[0, :, 0].numpy()
+            pred_full = raw_predictions[0, :, 1].numpy()
 
             # Inverse transform predictions
             unscaled_pred_first = self.scalers['countdown_to_first'].inverse_transform(
@@ -261,14 +270,12 @@ class SakuraTFTPredictor:
                 'mae_full': mae_full
             })
 
-        # Convert predictions to DataFrame
         predictions_df = pd.DataFrame(predictions)
 
         # Calculate overall metrics
         avg_mae_first = predictions_df['mae_first'].mean()
         avg_mae_full = predictions_df['mae_full'].mean()
 
-        # Print summary statistics
         print(f"MAE (days):")
         print(f"  First bloom: {avg_mae_first:.2f}")
         print(f"  Full bloom: {avg_mae_full:.2f}")
