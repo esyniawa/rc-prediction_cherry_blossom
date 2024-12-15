@@ -24,7 +24,7 @@ def convert_to_csv(file_path, output_csv):
         # Filter rows from 1969 onward
         data_start = data_start[data_start["Year"].astype(str).str.isdigit()]
         data_start["Year"] = data_start["Year"].astype(int)
-        data_start = data_start[data_start["Year"] >= 1969]
+        data_start = data_start[data_start["Year"] >= 1955]
 
         combined_data.append(data_start)
 
