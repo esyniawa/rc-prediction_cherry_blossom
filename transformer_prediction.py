@@ -83,8 +83,8 @@ class SakuraTransformer:
         """
         Prepare input and target sequences for a single example
         Returns:
-            - covariates_ts: TimeSeries containing temperature, lat, lng
-            - targets_ts: TimeSeries containing both countdown targets
+            - features_ts: TimeSeries containing [temperature, lat, lng]
+            - targets_ts: TimeSeries containing [countdown_first, countdown_full]
         """
         row = self.df.iloc[idx]
 
@@ -92,119 +92,105 @@ class SakuraTransformer:
         start_date = row['data_start_date']
         dates = pd.date_range(start=start_date, periods=len(row['temps_to_full']), freq='D')
 
-        # Create covariates DataFrame (inputs)
-        covariates = pd.DataFrame({
+        # Features: temperature, lat, lng
+        features = pd.DataFrame({
             'temperature': row['temps_to_full'],
             'lat': [row['lat']] * len(dates),
             'lng': [row['lng']] * len(dates)
         }, index=dates)
 
-        # Create targets DataFrame (both countdowns)
+        # Targets: countdowns
         targets = pd.DataFrame({
             'countdown_first': row['countdown_to_first'],
             'countdown_full': row['countdown_to_full']
         }, index=dates)
 
         # Convert to TimeSeries
-        covariates_ts = TimeSeries.from_dataframe(covariates)
+        features_ts = TimeSeries.from_dataframe(features)
         targets_ts = TimeSeries.from_dataframe(targets)
 
-        return covariates_ts, targets_ts
+        return features_ts, targets_ts
 
     def train(self):
-        """Train the transformer on both targets simultaneously"""
-        train_covariates = []
+        """Train the transformer"""
+        train_features = []
         train_targets = []
 
-        for train_idx in self.train_indices:
-            covariates, targets = self._prepare_sequence(train_idx)
-            train_covariates.append(covariates)
+        for train_idx in tqdm(self.train_indices, desc="Preparing training data"):
+            features, targets = self._prepare_sequence(train_idx)
+            train_features.append(features)
             train_targets.append(targets)
 
-        # Train single model for both targets
         self.model.fit(
-            series=train_targets,  # Contains both countdown sequences
-            past_covariates=train_covariates,  # Temperature and location data
+            series=train_targets,
+            past_covariates=train_features,
             verbose=True
         )
 
     def test(self, sequence_offset: float = 1.0):
-        """
-        Test the prediction of the transformer on the test set
-        """
+        """Test the model"""
         predictions = []
 
-        tqdm.write(f"\nTesting on {len(self.test_indices)} sequences...")
-
-        for test_idx in tqdm(self.test_indices,
-                             desc=f"Testing {self.tqdm_bar_position}",
-                             position=self.tqdm_bar_position):
+        for test_idx in tqdm(self.test_indices):
             # Get metadata
             row = self.df.iloc[test_idx]
 
-            # Prepare sequence
-            covariates, targets = self._prepare_sequence(test_idx)
+            # Prepare sequences
+            features, targets = self._prepare_sequence(test_idx)
 
-            # Calculate sequence cutoff point
-            cutoff = int(len(covariates) * sequence_offset)
+            # Calculate cutoff
+            cutoff = int(len(features) * sequence_offset)
 
-            # Generate predictions for both targets
-            predictions_ts = self.model.predict(
-                n=cutoff,
-                series=targets[:cutoff],
-                past_covariates=covariates[:cutoff]
+            # Use only up to cutoff point for prediction
+            pred_features = features[:cutoff]
+            true_targets = targets[:cutoff]
+
+            # Generate predictions
+            pred_targets = self.model.predict(
+                n=1,  # Predict one step at a time
+                series=true_targets,
+                past_covariates=pred_features
             )
 
-            # Extract prediction sequences
-            pred_first = predictions_ts['countdown_first'].values().flatten()
-            pred_full = predictions_ts['countdown_full'].values().flatten()
+            # Calculate MAE
+            mae_first = mae(
+                true_targets['countdown_first'],
+                pred_targets['countdown_first']
+            )
+            mae_full = mae(
+                true_targets['countdown_full'],
+                pred_targets['countdown_full']
+            )
 
-            # Extract true values
-            true_first = targets['countdown_first'].values()[:cutoff].flatten()
-            true_full = targets['countdown_full'].values()[:cutoff].flatten()
-
-            # Calculate MAE for each sequence
-            mae_first = np.mean(np.abs(pred_first - true_first))
-            mae_full = np.mean(np.abs(pred_full - true_full))
-
-            # Store results with metadata (matching reservoir format)
+            # Store results
             predictions.append({
                 'site_name': row['site_name'],
                 'year': row['year'],
                 'start_date': row['data_start_date'],
                 'date_first': row['first_bloom'],
                 'date_full': row['full_bloom'],
-                'true_first_sequence': true_first.tolist(),
-                'true_full_sequence': true_full.tolist(),
-                'pred_first_sequence': pred_first.tolist(),
-                'pred_full_sequence': pred_full.tolist(),
+                'true_first_sequence': true_targets['countdown_first'].values().flatten().tolist(),
+                'true_full_sequence': true_targets['countdown_full'].values().flatten().tolist(),
+                'pred_first_sequence': pred_targets['countdown_first'].values().flatten().tolist(),
+                'pred_full_sequence': pred_targets['countdown_full'].values().flatten().tolist(),
                 'cutoff': cutoff,
                 'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
                 'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
-                    days=float(pred_first[-1])),
+                    days=float(pred_targets['countdown_first'].last_value())),
                 'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
-                    days=float(pred_full[-1])),
-                'full_length': len(covariates),
+                    days=float(pred_targets['countdown_full'].last_value())),
+                'full_length': len(features),
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
 
-        # Convert predictions to DataFrame
+        # Create DataFrame
         predictions_df = pd.DataFrame(predictions)
 
-        # Calculate overall metrics
-        avg_mae_first = predictions_df['mae_first'].mean()
-        avg_mae_full = predictions_df['mae_full'].mean()
-
-        # Print summary statistics
-        tqdm.write(f"\nMAE (days):")
-        tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
-        tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
-        tqdm.write(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
-
+        # Calculate metrics
         metrics = {
-            'mae_first': float(avg_mae_first),
-            'mae_full': float(avg_mae_full)
+            'mae_first': float(predictions_df['mae_first'].mean()),
+            'mae_full': float(predictions_df['mae_full'].mean())
         }
 
         return predictions_df, metrics
