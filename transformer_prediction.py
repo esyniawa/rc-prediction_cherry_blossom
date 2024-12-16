@@ -10,6 +10,8 @@ from tqdm import tqdm
 import datetime
 import os
 import json
+import warnings
+warnings.filterwarnings("ignore")
 
 
 class SakuraTransformer:
@@ -151,6 +153,8 @@ class SakuraTransformer:
                 past_covariates=pred_features[:-1]  # Use all feature values except the last one
             )
 
+            print(pred_targets)
+
             # The prediction is for the cutoff point
             mae_first = np.abs(
                 targets['countdown_first'].values()[cutoff - 1] -
@@ -184,6 +188,8 @@ class SakuraTransformer:
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
+
+        return pd.DataFrame(predictions),
 
     def save_model(self, save_path: str):
         """Save the transformer model"""
