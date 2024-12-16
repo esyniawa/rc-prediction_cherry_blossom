@@ -82,9 +82,8 @@ class SakuraTransformer:
     def _prepare_sequence(self, idx: int) -> Tuple[TimeSeries, TimeSeries]:
         """
         Prepare input and target sequences for a single example
-        Returns:
-            - features_ts: TimeSeries containing [temperature, lat, lng]
-            - targets_ts: TimeSeries containing [countdown_first, countdown_full]
+        :returns: - features_ts: TimeSeries containing [temperature, lat, lng]
+                  - targets_ts: TimeSeries containing [countdown_first, countdown_full]
         """
         row = self.df.iloc[idx]
 
@@ -141,59 +140,50 @@ class SakuraTransformer:
             # Calculate cutoff
             cutoff = int(len(features) * sequence_offset)
 
-            # Use only up to cutoff point for prediction
+            # Use data up to cutoff (exclusive) to predict cutoff point
             pred_features = features[:cutoff]
             true_targets = targets[:cutoff]
 
-            # Generate predictions
+            # Generate predictions for the cutoff point
             pred_targets = self.model.predict(
-                n=1,  # Predict one step at a time
-                series=true_targets,
-                past_covariates=pred_features
+                n=1,
+                series=true_targets[:-1],  # Use all target values except the last one
+                past_covariates=pred_features[:-1]  # Use all feature values except the last one
             )
 
-            # Calculate MAE
-            mae_first = mae(
-                true_targets['countdown_first'],
-                pred_targets['countdown_first']
+            # The prediction is for the cutoff point
+            mae_first = np.abs(
+                targets['countdown_first'].values()[cutoff - 1] -
+                pred_targets['countdown_first'].last_value()
             )
-            mae_full = mae(
-                true_targets['countdown_full'],
-                pred_targets['countdown_full']
+            mae_full = np.abs(
+                targets['countdown_full'].values()[cutoff - 1] -
+                pred_targets['countdown_full'].last_value()
             )
 
-            # Store results
+            # Store results with proper sequences up to cutoff
             predictions.append({
                 'site_name': row['site_name'],
                 'year': row['year'],
                 'start_date': row['data_start_date'],
                 'date_first': row['first_bloom'],
                 'date_full': row['full_bloom'],
-                'true_first_sequence': true_targets['countdown_first'].values().flatten().tolist(),
-                'true_full_sequence': true_targets['countdown_full'].values().flatten().tolist(),
-                'pred_first_sequence': pred_targets['countdown_first'].values().flatten().tolist(),
-                'pred_full_sequence': pred_targets['countdown_full'].values().flatten().tolist(),
+                'true_first_sequence': targets['countdown_first'].values()[:cutoff].flatten().tolist(),
+                'true_full_sequence': targets['countdown_full'].values()[:cutoff].flatten().tolist(),
+                'pred_first_sequence': targets['countdown_first'].values()[:cutoff - 1].tolist() + [
+                    pred_targets['countdown_first'].last_value()],
+                'pred_full_sequence': targets['countdown_full'].values()[:cutoff - 1].tolist() + [
+                    pred_targets['countdown_full'].last_value()],
                 'cutoff': cutoff,
-                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
-                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
-                    days=float(pred_targets['countdown_first'].last_value())),
-                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(
-                    days=float(pred_targets['countdown_full'].last_value())),
+                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff - 1),
+                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(
+                    days=cutoff - 1) + datetime.timedelta(days=float(pred_targets['countdown_first'].last_value())),
+                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(
+                    days=cutoff - 1) + datetime.timedelta(days=float(pred_targets['countdown_full'].last_value())),
                 'full_length': len(features),
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
-
-        # Create DataFrame
-        predictions_df = pd.DataFrame(predictions)
-
-        # Calculate metrics
-        metrics = {
-            'mae_first': float(predictions_df['mae_first'].mean()),
-            'mae_full': float(predictions_df['mae_full'].mean())
-        }
-
-        return predictions_df, metrics
 
     def save_model(self, save_path: str):
         """Save the transformer model"""
