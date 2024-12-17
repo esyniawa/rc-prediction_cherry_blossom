@@ -280,11 +280,9 @@ def process_data(temp_df: pd.DataFrame,
 
         # Interpolate missing values
         daily_humidity_series = pd.Series(daily_humidity)
-        daily_humidity_series = interpolate_values(daily_humidity_series, min_points=30)
+        humidity_sequence = interpolate_values(daily_humidity_series, min_points=30)
 
-        return daily_humidity_series
-
-
+        return humidity_sequence
 
 
     def validate_temperature_data(row: pd.Series):
@@ -304,35 +302,6 @@ def process_data(temp_df: pd.DataFrame,
         # Both lists should be non-empty and have correct lengths
         return temps_first_valid and temps_full_valid
     
-    def validate_weather_data(row: pd.Series) -> bool:
-        # Validate that temperature and humidity lists exist and match the expected sequence lengths.
-        
-        # Expected lengths for temperature and humidity sequences
-        expected_length_first = row['days_to_first'] + 1 if pd.notna(row['days_to_first']) else 0
-        expected_length_full = row['days_to_full'] + 1 if pd.notna(row['days_to_full']) else 0
-
-        def is_valid_sequence(sequence, expected_length):
-            return (
-                isinstance(sequence, list) and       # Must be a list
-                len(sequence) > 0 and               # Must not be empty
-                len(sequence) == expected_length and # Must match expected length
-                all(isinstance(x, (int, float)) for x in sequence)  # Must contain numeric values
-            )
-
-        # Check temperature sequences
-        temps_first_valid = (
-            len(row['temps_to_first']) == expected_length_first) if expected_length_first > 0 else False
-        temps_full_valid = (
-            len(row['temps_to_full']) == expected_length_full) if expected_length_full > 0 else False
-
-        # Check humidity sequences
-        humidity_first_valid = (len(row['humidity_to_first']) == expected_length_first) if expected_length_first > 0 else False
-        humidity_full_valid = is_valid_sequence(row['humidity_to_full'], expected_length_full)
-
-
-        # Ensure all sequences are valid
-        return temps_first_valid and temps_full_valid and humidity_first_valid and humidity_full_valid
-
 
     def process_city_data(group):
         results = []
@@ -352,14 +321,10 @@ def process_data(temp_df: pd.DataFrame,
             # Get humidity sequences
             humidity_to_first = get_humidity_sequence(row, humid_df, start_date, first_date)
             humidity_to_full = get_humidity_sequence(row, humid_df, start_date, full_date)
-            # humidity_to_first = clean_numeric_sequence(humidity_to_first)
-            # humidity_to_full = clean_numeric_sequence(humidity_to_full)
 
             # Convert humidity to consistent numeric format
             humidity_to_first = np.array(humidity_to_first, dtype=np.float32) if humidity_to_first else np.array([], dtype=np.float32)
             humidity_to_full = np.array(humidity_to_full, dtype=np.float32) if humidity_to_full else np.array([], dtype=np.float32)
-
-            
 
             # Calculate days offset
             days_to_first = (first_date - start_date).days
@@ -374,9 +339,6 @@ def process_data(temp_df: pd.DataFrame,
                 range(days_to_first, -bloom_offset - 1, -1))  # [days_to_first, ..., -bloom_offset]
             countdown_to_full = list(
                 range(days_to_full, -1, -1))  # [days_to_full, ..., 0]
-            
-            # humidity_to_first = clean_numeric_sequence(humidity_to_first)
-            # humidity_to_full = clean_numeric_sequence(humidity_to_full)
 
             results.append({
                 'site_name': row['Site Name'],
