@@ -8,9 +8,13 @@ import pickle
 # https://www.kaggle.com/datasets/ryanglasnapp/japanese-cherry-blossom-data,
 # https://www.kaggle.com/datasets/ryanglasnapp/japanese-temperature-data
 # https://www.kaggle.com/datasets/juanmah/world-cities
+#
+# As well as from Japan Meteorological Agency directly:
+# https://www.data.jma.go.jp/stats/etrn/view/monthly_s3_en.php?block_no=47401&view=7
 
 import pandas as pd
 import numpy as np
+import re
 
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler, StandardScaler, RobustScaler, MaxAbsScaler
@@ -139,6 +143,7 @@ def interpolate_values(data_row: pd.Series,
 
 
 def process_data(temp_df: pd.DataFrame,
+                 humid_df: pd.DataFrame,
                  first_bloom_df: pd.DataFrame,
                  full_bloom_df: pd.DataFrame,
                  cities_df: pd.DataFrame,
@@ -149,6 +154,7 @@ def process_data(temp_df: pd.DataFrame,
     Function to merge the different datasets for sakura prediction
 
     :param temp_df: Dataframe with temperature data of different japanese cities
+    :param humid_df: Dataframe with humidity data of different japanese weather stations 
     :param first_bloom_df: Dataframe with the beginning of the sakura bloom dates for different japanese cities
     :param full_bloom_df: Dataframe with the date of the full sakura bloom for different japanese cities
     :param cities_df: Dataframe with geographic information about japanese cities
@@ -218,6 +224,68 @@ def process_data(temp_df: pd.DataFrame,
         temps = interpolate_values(pd.Series(temps), min_points=30)
 
         return temps
+    
+    def get_humidity_sequence(row: pd.Series, humid_df: pd.DataFrame, start_date: datetime, end_date: datetime):
+        """
+        Optimized extraction and interpolation of humidity data for a city within a date range.
+
+        Args:
+            row: Row containing city name.
+            humid_df: DataFrame with humidity data.
+            start_date: Start date of the range.
+            end_date: End date of the range.
+
+        Returns:
+            List of daily humidity values within the date range.
+        """
+        # Filter rows for the specific city
+        city_humidity = humid_df[humid_df['City'] == row['Site Name']]
+        if city_humidity.empty:
+            return []
+
+        # Extract year range
+        start_year, end_year = start_date.year, end_date.year
+        relevant_humidity = city_humidity[
+            (city_humidity['Year'] >= start_year) & (city_humidity['Year'] <= end_year)
+        ]
+
+        if relevant_humidity.empty:
+            return []
+
+        # Map months to numerical indices
+        month_map = {
+            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
+        }
+        monthly_columns = list(month_map.keys())
+
+        # Pre-calculate monthly humidity values mapped to (year, month)
+        year_month_humidity = {}
+        for _, row in relevant_humidity.iterrows():
+            year = row['Year']
+            for month in monthly_columns:
+                try:
+                    avg_humidity = float(row[month])
+                    year_month_humidity[(year, month_map[month])] = avg_humidity
+                except (ValueError, TypeError):
+                    year_month_humidity[(year, month_map[month])] = None  # Mark as missing
+
+        # Generate daily date range
+        date_range = pd.date_range(start=start_date, end=end_date)
+
+        # Map each day to its corresponding (year, month) and fetch humidity
+        daily_humidity = [
+            year_month_humidity.get((date.year, date.month), None) for date in date_range
+        ]
+
+        # Interpolate missing values
+        daily_humidity_series = pd.Series(daily_humidity)
+        daily_humidity_series = interpolate_values(daily_humidity_series, min_points=30)
+
+        return daily_humidity_series
+
+
+
 
     def validate_temperature_data(row: pd.Series):
         """
@@ -235,6 +303,36 @@ def process_data(temp_df: pd.DataFrame,
 
         # Both lists should be non-empty and have correct lengths
         return temps_first_valid and temps_full_valid
+    
+    def validate_weather_data(row: pd.Series) -> bool:
+        # Validate that temperature and humidity lists exist and match the expected sequence lengths.
+        
+        # Expected lengths for temperature and humidity sequences
+        expected_length_first = row['days_to_first'] + 1 if pd.notna(row['days_to_first']) else 0
+        expected_length_full = row['days_to_full'] + 1 if pd.notna(row['days_to_full']) else 0
+
+        def is_valid_sequence(sequence, expected_length):
+            return (
+                isinstance(sequence, list) and       # Must be a list
+                len(sequence) > 0 and               # Must not be empty
+                len(sequence) == expected_length and # Must match expected length
+                all(isinstance(x, (int, float)) for x in sequence)  # Must contain numeric values
+            )
+
+        # Check temperature sequences
+        temps_first_valid = (
+            len(row['temps_to_first']) == expected_length_first) if expected_length_first > 0 else False
+        temps_full_valid = (
+            len(row['temps_to_full']) == expected_length_full) if expected_length_full > 0 else False
+
+        # Check humidity sequences
+        humidity_first_valid = (len(row['humidity_to_first']) == expected_length_first) if expected_length_first > 0 else False
+        humidity_full_valid = is_valid_sequence(row['humidity_to_full'], expected_length_full)
+
+
+        # Ensure all sequences are valid
+        return temps_first_valid and temps_full_valid and humidity_first_valid and humidity_full_valid
+
 
     def process_city_data(group):
         results = []
@@ -250,6 +348,18 @@ def process_data(temp_df: pd.DataFrame,
             # Get temperature sequences
             temps_to_first = get_temp_sequence(row, temp_df, start_date, first_date)
             temps_to_full = get_temp_sequence(row, temp_df, start_date, full_date)
+            
+            # Get humidity sequences
+            humidity_to_first = get_humidity_sequence(row, humid_df, start_date, first_date)
+            humidity_to_full = get_humidity_sequence(row, humid_df, start_date, full_date)
+            # humidity_to_first = clean_numeric_sequence(humidity_to_first)
+            # humidity_to_full = clean_numeric_sequence(humidity_to_full)
+
+            # Convert humidity to consistent numeric format
+            humidity_to_first = np.array(humidity_to_first, dtype=np.float32) if humidity_to_first else np.array([], dtype=np.float32)
+            humidity_to_full = np.array(humidity_to_full, dtype=np.float32) if humidity_to_full else np.array([], dtype=np.float32)
+
+            
 
             # Calculate days offset
             days_to_first = (first_date - start_date).days
@@ -264,6 +374,9 @@ def process_data(temp_df: pd.DataFrame,
                 range(days_to_first, -bloom_offset - 1, -1))  # [days_to_first, ..., -bloom_offset]
             countdown_to_full = list(
                 range(days_to_full, -1, -1))  # [days_to_full, ..., 0]
+            
+            # humidity_to_first = clean_numeric_sequence(humidity_to_first)
+            # humidity_to_full = clean_numeric_sequence(humidity_to_full)
 
             results.append({
                 'site_name': row['Site Name'],
@@ -277,7 +390,9 @@ def process_data(temp_df: pd.DataFrame,
                 'countdown_to_first': countdown_to_first,
                 'countdown_to_full': countdown_to_full,
                 'temps_to_first': temps_to_first,
-                'temps_to_full': temps_to_full
+                'temps_to_full': temps_to_full,
+                'humidity_to_first': humidity_to_first,
+                'humidity_to_full': humidity_to_full
             })
 
         return pd.DataFrame(results)
@@ -322,11 +437,13 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
     first_blossom_df = pd.read_csv('./data/sakura_first_bloom_dates.csv')
     temps_df = pd.read_csv('./data/Japanese_City_Temps.csv')
     city_df = pd.read_csv('./data/worldcities.csv')
+    humid_df = pd.read_csv('./data/humidity_data.csv')
 
     # Process data
     start_day, start_month = parse_date(start_date)
 
     result_df = process_data(temp_df=temps_df,
+                             humid_df=humid_df,
                              full_bloom_df=full_blossom_df,
                              first_bloom_df=first_blossom_df,
                              cities_df=city_df,
@@ -335,6 +452,13 @@ def create_sakura_data(start_date: str,  # Begin of Temperature data in "DD:MM"
 
     if drop_na:
         result_df = result_df.dropna()
+
+    print("Final DataFrame shape before scaling:", result_df.shape)
+    print("Columns in DataFrame:", result_df.columns)
+    print("Non-empty rows:", result_df.notna().sum())
+
+    print("Sample values in countdown_to_first:")
+    print(result_df['countdown_to_first'].head())
 
     scalers = {}
     if scale_data:

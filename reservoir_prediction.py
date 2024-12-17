@@ -39,7 +39,7 @@ class SakuraReservoir:
         # Initialize reservoir
         self.reservoir = Reservoir(
             dim_reservoir=reservoir_size,
-            dim_input=3,  # lat, lng, temp_full
+            dim_input=4,  # lat, lng, temp_full, humidity_full
             dim_output=2,  # countdown_first, countdown_full
             tau=tau,
             probability_recurrent_connection=probability_recurrent_connection,
@@ -165,20 +165,31 @@ class SakuraReservoir:
 
         # Dynamic input (temperature)
         temps = torch.tensor(row['temps_to_full'], dtype=torch.float32)
+        
+        humidity = torch.tensor(list(np.array([x for x in row['humidity_to_full']], dtype=np.float32)), dtype=torch.float32)
+        # print(type(np.array([x for x in row['humidity_to_full']])))
 
         # Targets (countdown sequences)
         target_first = torch.tensor(row['countdown_to_first'], dtype=torch.float32)
         target_full = torch.tensor(row['countdown_to_full'], dtype=torch.float32)
 
+        # Determine minimum sequence length to ensure alignment
+        seq_length = min(len(temps), len(humidity), len(target_first), len(target_full))
+        temps = temps[:seq_length]
+        humidity = humidity[:seq_length]
+        target_first = target_first[:seq_length]
+        target_full = target_full[:seq_length]
+
         # Combine inputs
         seq_length = len(temps)
-        inputs = torch.zeros((seq_length, 3))  # [lat, lng, temp_full]
+        inputs = torch.zeros((seq_length, 4))  # [lat, lng, temp_full, humid_full]
         targets = torch.zeros((seq_length, 2))  # [countdown_first, countdown_full]
 
         # Fill sequences
         inputs[:, 0] = static_input[0]  # lat
         inputs[:, 1] = static_input[1]  # lng
         inputs[:, 2] = temps  # temperature sequence
+        inputs[:, 3] = humidity  # humidity sequence
 
         targets[:len(target_first), 0] = target_first
         targets[:len(target_full), 1] = target_full
@@ -406,6 +417,7 @@ def main(save_data_path: str,
 if __name__ == "__main__":
     import argparse
 
+    print("Working here")
     parser = argparse.ArgumentParser()
     parser.add_argument('--sim_id', type=int, default=0)
     parser.add_argument('--dim_reservoir', type=int, default=2_000)
@@ -413,17 +425,17 @@ if __name__ == "__main__":
     parser.add_argument('--prop_recurrent', type=float, default=0.2)
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--chaos_factor', type=float, default=1.5)
-    parser.add_argument('--noise_scaling', type=float, default=0.1)
+    parser.add_argument('--noise_scaling', type=float, default=0.02)
     parser.add_argument('--training_set_size', type=float, default=0.8)
     parser.add_argument('--num_epochs', type=int, default=5)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-
+    print("here too")
     args = parser.parse_args()
-
+    print("here three")
     # folder
     save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
     cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980, 0.990,]
-
+    print("starting model")
     # run model
     main(save_data_path=save_data_path,
          save_model_path=save_data_path + '/reservoir_model.pt',
