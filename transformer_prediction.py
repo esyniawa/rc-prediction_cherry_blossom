@@ -3,15 +3,34 @@ import numpy as np
 import pandas as pd
 from darts import TimeSeries
 from darts.models import TransformerModel
-from darts.metrics import mae
 from sklearn.model_selection import train_test_split
 from typing import Tuple, List, Optional
 from tqdm import tqdm
 import datetime
+from contextlib import contextmanager
 import os
+import sys
 import json
 import warnings
+
+# Suppress warnings mostly from darts
 warnings.filterwarnings("ignore")
+
+
+@contextmanager
+def suppress_output():
+    """Suppresses output to stdout and stderr."""
+    stdout = sys.stdout
+    stderr = sys.stderr
+    devnull = open(os.devnull, 'w')
+    sys.stdout = devnull
+    sys.stderr = devnull
+    try:
+        yield
+    finally:
+        sys.stdout = stdout
+        sys.stderr = stderr
+        devnull.close()
 
 
 class SakuraTransformer:
@@ -27,7 +46,8 @@ class SakuraTransformer:
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
                  sim_id: int = 0,
-                 device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
+                 device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+                 number_of_devices: int = 1):
         """Initialize the Sakura Transformer"""
         tqdm.write(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
@@ -56,8 +76,8 @@ class SakuraTransformer:
             force_reset=True,
             pl_trainer_kwargs={
                 "accelerator": "gpu" if str(device) == "cuda" else "cpu",
-                "devices": 1
-            }
+                "devices": number_of_devices
+            },
         )
 
         if load_pretrained_model is not None:
@@ -112,6 +132,18 @@ class SakuraTransformer:
 
         return features_ts, targets_ts
 
+    @staticmethod
+    def _inverse_transform_predictions(scaled_data: np.ndarray, scaler, is_sequence: bool = True) -> np.ndarray:
+        """Inverse transform scaled predictions back to original scale"""
+        if is_sequence:
+            original_shape = scaled_data.shape
+            reshaped_data = scaled_data.reshape(-1, 1)
+            unscaled_data = scaler.inverse_transform(reshaped_data).reshape(original_shape)
+        else:
+            unscaled_data = scaler.inverse_transform(scaled_data)
+
+        return unscaled_data
+
     def train(self):
         """Train the transformer"""
         train_features = []
@@ -128,11 +160,13 @@ class SakuraTransformer:
             verbose=True
         )
 
-    def test(self, sequence_offset: float = 1.0):
+    def test(self,
+             sequence_offset: float = 1.0,
+             logging: bool = False):
         """Test the model"""
         predictions = []
 
-        for test_idx in tqdm(self.test_indices):
+        for test_idx in self.test_indices:
             # Get metadata
             row = self.df.iloc[test_idx]
 
@@ -150,20 +184,37 @@ class SakuraTransformer:
             pred_targets = self.model.predict(
                 n=1,
                 series=true_targets[:-1],  # Use all target values except the last one
-                past_covariates=pred_features[:-1]  # Use all feature values except the last one
+                past_covariates=pred_features[:-1],  # Use all feature values except the last one
+                show_warnings=logging
             )
 
-            print(pred_targets)
+            # Convert TimeSeries to numpy array
+            pred_targets = TimeSeries.values(pred_targets)[0]
+            true_targets = TimeSeries.values(targets[cutoff])[0]
 
-            # The prediction is for the cutoff point
-            mae_first = np.abs(
-                targets['countdown_first'].values()[cutoff - 1] -
-                pred_targets['countdown_first'].last_value()
+            # Unscale predictions and targets
+            unscaled_pred_first = self._inverse_transform_predictions(
+                pred_targets[0],
+                self.scalers['countdown_to_first']
             )
-            mae_full = np.abs(
-                targets['countdown_full'].values()[cutoff - 1] -
-                pred_targets['countdown_full'].last_value()
+            unscaled_pred_full = self._inverse_transform_predictions(
+                pred_targets[1],
+                self.scalers['countdown_to_full']
             )
+
+            unscaled_true_first = self._inverse_transform_predictions(
+                true_targets[0],
+                self.scalers['countdown_to_first']
+            )
+            unscaled_true_full = self._inverse_transform_predictions(
+                true_targets[1],
+                self.scalers['countdown_to_full']
+            )
+
+            print(unscaled_pred_first, unscaled_pred_full, unscaled_true_first, unscaled_true_full)
+            # Calculate errors
+            mae_first = np.abs(unscaled_pred_first - unscaled_true_first)
+            mae_full = np.abs(unscaled_pred_full - unscaled_true_full)
 
             # Store results with proper sequences up to cutoff
             predictions.append({
@@ -172,24 +223,37 @@ class SakuraTransformer:
                 'start_date': row['data_start_date'],
                 'date_first': row['first_bloom'],
                 'date_full': row['full_bloom'],
-                'true_first_sequence': targets['countdown_first'].values()[:cutoff].flatten().tolist(),
-                'true_full_sequence': targets['countdown_full'].values()[:cutoff].flatten().tolist(),
-                'pred_first_sequence': targets['countdown_first'].values()[:cutoff - 1].tolist() + [
-                    pred_targets['countdown_first'].last_value()],
-                'pred_full_sequence': targets['countdown_full'].values()[:cutoff - 1].tolist() + [
-                    pred_targets['countdown_full'].last_value()],
+                'true_first': float(unscaled_true_first),
+                'true_full': float(unscaled_true_full),
+                'pred_first': float(unscaled_pred_first),
+                'pred_full': float(unscaled_pred_full),
                 'cutoff': cutoff,
-                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff - 1),
-                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(
-                    days=cutoff - 1) + datetime.timedelta(days=float(pred_targets['countdown_first'].last_value())),
-                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(
-                    days=cutoff - 1) + datetime.timedelta(days=float(pred_targets['countdown_full'].last_value())),
-                'full_length': len(features),
+                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
+                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=float(unscaled_pred_first)),
+                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=float(unscaled_pred_full)),
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
 
-        return pd.DataFrame(predictions),
+        # Convert predictions to DataFrame
+        predictions_df = pd.DataFrame(predictions)
+
+        # Calculate overall metrics
+        avg_mae_first = predictions_df['mae_first'].mean()
+        avg_mae_full = predictions_df['mae_full'].mean()
+
+        # Print summary statistics
+        tqdm.write(f"\nMAE (days):")
+        tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
+        tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
+        tqdm.write(f"  Average: {(avg_mae_first + avg_mae_full) / 2:.2f}")
+
+        metrics = {
+            'mae_first': float(avg_mae_first),
+            'mae_full': float(avg_mae_full)
+        }
+
+        return predictions_df, metrics
 
     def save_model(self, save_path: str):
         """Save the transformer model"""
@@ -278,7 +342,9 @@ def main(save_data_path: str,
 
     # Test
     for cutoff in test_cutoff:
-        predictions_df, metrics = sakura_transformer.test(sequence_offset=cutoff)
+        # suppress print outs
+        with suppress_output():
+            predictions_df, metrics = sakura_transformer.test(sequence_offset=cutoff)
 
         # Save predictions
         folder = save_data_path + f'test_cutoff_{cutoff}/'
