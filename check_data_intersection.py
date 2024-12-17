@@ -7,6 +7,9 @@ import seaborn as sns
 temp_df = pd.read_csv('./data/Japanese_City_Temps.csv')
 temp_cities = set(temp_df.columns[1:])  # Exclude Date column
 
+humidity_df = pd.read_csv('./data/humidity_data.csv')
+humidity_cities = set(humidity_df['City']) 
+
 sakura_first_df = pd.read_csv('data/sakura_first_bloom_dates.csv')
 sakura_first_cities = set(sakura_first_df['Site Name'])
 
@@ -18,6 +21,7 @@ world_cities = set(world_cities_df['city_ascii'])
 
 unique_cities = {
     'temp_df': len(temp_cities),
+    'humid_df': len(humidity_cities),
     'sakura_first_df': len(sakura_first_cities),
     'sakura_full_df': len(sakura_full_cities),
     'world_cities_df': len(world_cities)
@@ -27,6 +31,7 @@ print(unique_cities)
 # Create pairs of datasets
 datasets = {
     'Temperature': temp_cities,
+    'Humidity': humidity_cities,
     'Sakura First Bloom': sakura_first_cities,
     'Sakura Full Bloom': sakura_full_cities,
     'World Cities': world_cities
@@ -54,7 +59,13 @@ overlap_counts = {
     'Temperature vs Sakura First': len(temp_cities.intersection(sakura_first_cities)),
     'Temperature vs Sakura Full': len(temp_cities.intersection(sakura_full_cities)),
     'Temperature vs World Cities': len(temp_cities.intersection(world_cities)),
+    'Humidity vs Sakura First': len(humidity_cities.intersection(sakura_first_cities)),
+    'Humidity vs Sakura Full': len(humidity_cities.intersection(sakura_full_cities)),
+    'Humidity vs World Cities': len(humidity_cities.intersection(world_cities)),
     'Sakura First vs Sakura Full': len(sakura_first_cities.intersection(sakura_full_cities)),
     'Sakura First vs World Cities': len(sakura_first_cities.intersection(world_cities)),
     'Sakura Full vs World Cities': len(sakura_full_cities.intersection(world_cities))
 }
+
+print("Overlap counts:")
+print(overlap_counts)

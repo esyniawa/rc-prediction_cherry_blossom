@@ -19,6 +19,16 @@ scalers_config = {
         'scaler_type': 'minmax',
         'scaler_kwargs': None
     },
+    'humidity_to_first': {  # Added for humidity to first bloom
+        'column_name': 'humidity_to_first',
+        'scaler_type': 'minmax',
+        'scaler_kwargs': None
+    },
+    'humidity_to_full': {  # Added for humidity to full bloom
+        'column_name': 'humidity_to_full',
+        'scaler_type': 'minmax',
+        'scaler_kwargs': None
+    },
     'lat': {
         'column_name': 'lat',
         'scaler_type': 'robust',
