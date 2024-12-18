@@ -265,7 +265,11 @@ def process_data(temp_df: pd.DataFrame,
             year = row['Year']
             for month in monthly_columns:
                 try:
-                    avg_humidity = float(row[month])
+                    # Clean unwanted characters before conversion
+                    raw_value = str(row[month])
+                    cleaned_value = raw_value.replace(" )", "").replace(" ]", "").strip()
+                    avg_humidity = float(cleaned_value)
+                    # avg_humidity = float(row[month])
                     year_month_humidity[(year, month_map[month])] = avg_humidity
                 except (ValueError, TypeError):
                     year_month_humidity[(year, month_map[month])] = None  # Mark as missing
