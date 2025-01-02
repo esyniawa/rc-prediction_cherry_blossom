@@ -380,6 +380,9 @@ def process_data(temp_df: pd.DataFrame,
         valid_rows = final_data.apply(validate_temperature_data, axis=1)
         final_data = final_data[valid_rows].reset_index(drop=True)
 
+    # Remove rows with invalid or empty humidity lists
+    final_data = final_data[final_data[['humidity_to_first', 'humidity_to_full']].applymap(len).min(axis=1) > 0]
+
     # Merge with city coordinates
     print("Merge all data...")
     final_data = pd.merge(
