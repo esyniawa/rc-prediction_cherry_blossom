@@ -170,7 +170,8 @@ class ForceTrainer:
 
             return error_minus, error_plus
         else:
-            return error_minus, error_minus
+            return error_minus, torch.empty_like(error_minus)
+
 
 class FullForceTrainer:
     def __init__(self,
@@ -179,7 +180,8 @@ class FullForceTrainer:
                  seed: Optional[int] = None,
                  clone_input_weights: bool = True,
                  set_recurrent_weights_to_zeros: bool = True,
-                 # In the implementation of the paper, they set the recurrent weights of the task network to zero
+                 # In the implementation of the paper, they set the recurrent weights of the task network to zero,
+                 # also to asure no chaotic reservoir
                  ):
         self.task_network = task_network
         self.device = task_network.device
@@ -260,7 +262,7 @@ class FullForceTrainer:
 
         else:
             error_minus = torch.matmul(self.task_network.W_out, torch.tanh(self.task_network.r)) - target
-            return error_minus, error_minus
+            return error_minus, torch.empty_like(error_minus)
 
     def reset_states(self):
         self.task_network.reset_state()

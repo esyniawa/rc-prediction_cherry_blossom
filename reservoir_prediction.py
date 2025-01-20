@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import os
 import json
-from network.reservoir_torch import Reservoir, ForceTrainer
+from network.reservoir_torch import Reservoir, ForceTrainer, FullForceTrainer
 from sakura_data import load_sakura_data
 from sklearn.model_selection import train_test_split
 from typing import Tuple, List, Optional
@@ -20,6 +20,8 @@ class SakuraReservoir:
                  probability_recurrent_connection: float = 0.1,
                  initial_noise: float = 0.025,  # renamed from noise_scaling
                  alpha_FORCE: float = 1.0,
+                 full_force: bool = False,
+                 update_probability: float = 1.0,
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
                  sim_id: int = 0,
@@ -52,7 +54,11 @@ class SakuraReservoir:
             self.reservoir.load(load_pretrained_model)
 
         # Initialize trainer
-        self.trainer = ForceTrainer(self.reservoir, alpha=alpha_FORCE)
+        self.update_probability = update_probability
+        if full_force:
+            self.trainer = FullForceTrainer(self.reservoir, alpha=alpha_FORCE)
+        else:
+            self.trainer = ForceTrainer(self.reservoir, alpha=alpha_FORCE)
 
         # Split data
         self.train_indices, self.test_indices = self._split_data()
@@ -111,10 +117,11 @@ class SakuraReservoir:
                     # Update noise scaling for this timestep
                     self.reservoir.noise_scaling = noise_schedule[t].item()
 
-                    error_minus, error_plus = self.trainer.train_step(
+                    self.trainer.train_step(
                         inputs[t],
                         targets[t],
-                        dt=dt
+                        dt=dt,
+                        w_update=np.random.rand() < self.update_probability
                     )
 
     def _calculate_training_error(self, dt: float):
@@ -333,7 +340,9 @@ def main(save_data_path: str,
          test_cutoff: list[float],
          dim_reservoir: int,
          num_epochs: int,
+         full_force: bool,
          training_set_size: float = 0.8,
+         update_probability: float = 1.0,
          dt: float = 0.1,
          chaos_factor: float = 1.5,
          alpha: float = 1.0,
@@ -366,10 +375,12 @@ def main(save_data_path: str,
         reservoir_size=dim_reservoir,
         tau=10.0,
         chaos_factor=chaos_factor,
+        full_force=full_force,
         train_percentage=training_set_size,
         initial_noise=noise_scaling,
         alpha_FORCE=alpha,
         probability_recurrent_connection=probability_recurrent_connection,
+        update_probability=update_probability,
         seed=seed,
         device=device,
         sim_id=tqdm_bar_position
@@ -408,9 +419,12 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--sim_id', type=int, default=0)
-    parser.add_argument('--dim_reservoir', type=int, default=2_000)
+    parser.add_argument('--full_force', type=bool, default=False)
+    parser.add_argument('--dim_reservoir', type=int, default=1_000)
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--prop_recurrent', type=float, default=0.2)
+    parser.add_argument('--prop_update', type=float, default=1.0)
+    parser.add_argument('--dt', type=float, default=0.1)
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--chaos_factor', type=float, default=1.5)
     parser.add_argument('--noise_scaling', type=float, default=0.1)
@@ -421,20 +435,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # folder
-    save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
+    save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}_full_force_{args.full_force}/'
     cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980, 0.990,]
 
     # run model
     main(save_data_path=save_data_path,
          save_model_path=save_data_path + '/reservoir_model.pt',
+         full_force=args.full_force,
          test_cutoff=cutoffs,
          num_epochs=args.num_epochs,
          dim_reservoir=args.dim_reservoir,
          training_set_size=args.training_set_size,
-         dt=0.1,
+         dt=args.dt,
          chaos_factor=args.chaos_factor,
          alpha=args.alpha,
          probability_recurrent_connection=args.prop_recurrent,
+         update_probability=args.prop_update,
          noise_scaling=args.noise_scaling,
          seed=args.seed,
          do_plot=True,
