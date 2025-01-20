@@ -179,6 +179,7 @@ class FullForceTrainer:
                  alpha: float = 1.0,
                  seed: Optional[int] = None,
                  clone_input_weights: bool = True,  # clones input weights from task network to the target network
+                 clone_target_weights: bool = False,
                  set_recurrent_weights_to_zeros: bool = True,
                  # In the implementation of the paper, they set the recurrent weights of the task network to zero,
                  # also to asure no chaotic reservoir
@@ -208,7 +209,9 @@ class FullForceTrainer:
         # Some initialisations from the authors
         if clone_input_weights:
             self.target_network.W_in[:, :self.task_network.dim_input] = self.task_network.W_in[:, :self.task_network.dim_input]
-            # self.target_network.W_in[:, self.task_network.dim_input:] = self.task_network.W_in[:, :self.task_network.dim_output]
+
+        if clone_target_weights:
+            self.target_network.W_in[:, self.task_network.dim_input:] = self.task_network.W_in[:, :self.task_network.dim_output]
 
         if set_recurrent_weights_to_zeros:
             self.task_network.W_rec.zero_()
@@ -301,7 +304,8 @@ def make_dynamic_target(dim_out: int, n_periods: int, seed: Optional[int] = None
     return y, T
 
 
-def test_reservoir(seed: Optional[int] = None):
+def test_reservoir(seed: Optional[int] = None,
+                   full_force: bool = False,):
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -321,15 +325,18 @@ def test_reservoir(seed: Optional[int] = None):
         dim_input=dim_input,
         dim_output=dim_input,
         tau=0.01,
-        chaos_factor=1.0,
+        chaos_factor=1.5,
         probability_recurrent_connection=1.0,
         device=device,
-        feedback_scaling=0.0,
+        feedback_scaling=1.0,
         w_out_initialization=None,
     )
 
     # Initialize trainer
-    trainer = FullForceTrainer(reservoir, alpha=1.0)
+    if full_force:
+        trainer = FullForceTrainer(reservoir, alpha=1.0)
+    else:
+        trainer = ForceTrainer(reservoir, alpha=1.0)
 
     # Training parameters
     n_steps = len(target_signal)
@@ -443,4 +450,4 @@ def test_reservoir(seed: Optional[int] = None):
 if __name__ == "__main__":
     # Set random seed for reproducibility
     seed = 42
-    reservoir, errors = test_reservoir(seed=seed)
+    reservoir, errors = test_reservoir(seed=seed, full_force=True)
