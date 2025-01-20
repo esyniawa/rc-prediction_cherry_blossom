@@ -178,7 +178,7 @@ class FullForceTrainer:
                  task_network: Reservoir,
                  alpha: float = 1.0,
                  seed: Optional[int] = None,
-                 clone_input_weights: bool = True,
+                 clone_input_weights: bool = True,  # clones input weights from task network to the target network
                  set_recurrent_weights_to_zeros: bool = True,
                  # In the implementation of the paper, they set the recurrent weights of the task network to zero,
                  # also to asure no chaotic reservoir
@@ -235,8 +235,8 @@ class FullForceTrainer:
 
         if w_update:
             # Get rates
-            r = torch.tanh(self.task_network.r)
-            rd = torch.tanh(self.target_network.r)
+            r = self.task_network.r
+            rd = self.target_network.r
 
             # Compute errors
             J_err = (torch.matmul(self.task_network.W_rec, r) -
