@@ -136,7 +136,7 @@ class ForceTrainer:
                    input_signal: torch.Tensor | np.ndarray,
                    target: torch.Tensor | np.ndarray,
                    dt: float = 0.1,
-                   weight_update: bool = True,
+                   w_update: bool = True,
                    ):
 
         if isinstance(input_signal, np.ndarray):
@@ -154,7 +154,7 @@ class ForceTrainer:
         # Compute error
         error_minus = output - target
 
-        if weight_update:
+        if w_update:
             # Update P matrix
             r = self.reservoir.r
             Pr = torch.matmul(self.P, r)
