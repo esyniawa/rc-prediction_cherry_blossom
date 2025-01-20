@@ -343,7 +343,7 @@ def main(save_data_path: str,
          full_force: bool,
          training_set_size: float = 0.8,
          update_probability: float = 1.0,
-         dt: float = 0.1,
+         dt: float = 0.001,
          chaos_factor: float = 1.5,
          alpha: float = 1.0,
          probability_recurrent_connection: float = 0.2,
@@ -373,7 +373,7 @@ def main(save_data_path: str,
     # Initialize reservoir
     sakura_rc = SakuraReservoir(
         reservoir_size=dim_reservoir,
-        tau=10.0,
+        tau=0.01,
         chaos_factor=chaos_factor,
         full_force=full_force,
         train_percentage=training_set_size,
@@ -424,7 +424,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=None)
     parser.add_argument('--prop_recurrent', type=float, default=0.2)
     parser.add_argument('--prop_update', type=float, default=1.0)
-    parser.add_argument('--dt', type=float, default=0.1)
+    parser.add_argument('--dt', type=float, default=0.001)
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--chaos_factor', type=float, default=1.5)
     parser.add_argument('--noise_scaling', type=float, default=0.1)
