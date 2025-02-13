@@ -168,7 +168,7 @@ def process_data(temp_df: pd.DataFrame,
     print("Processing data:")
     # Convert cities data to focus on Japanese cities
     print("Get japanese cities...")
-    japan_cities = cities_df[cities_df['country'] == 'Japan'].copy()
+    japan_cities = cities_df[(cities_df['country'] == 'Japan') & (cities_df['lat'] >= 30)].copy()
     japan_cities = japan_cities[['city_ascii', 'lat', 'lng']]
 
     # Process bloom dates
