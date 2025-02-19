@@ -37,6 +37,8 @@ class SakuraReservoir:
 
         # Load and process data (assumes the resulting DataFrame has a 'year' column among others)
         self.df, self.scalers = load_sakura_data()
+        # Reset index to ensure positional indexing works correctly.
+        self.df.reset_index(drop=True, inplace=True)
 
         # New: store the training and test year info (if provided)
         self.training_end_year = training_end_year
@@ -170,11 +172,10 @@ class SakuraReservoir:
         self.train_indices, self.test_indices = self._split_data_custom()
 
     def reset_output_weights(self):
-        """
-        Reset the reservoir's output (readout) weights by reinitializing the FORCE trainer.
-        (This effectively sets the output weights to zero.)
-        """
-        self.trainer = ForceTrainer(self.reservoir, alpha=self.trainer.alpha)
+        # Only reset the output (readout) weights to zero,
+        # leaving all the other weights unchanged.
+        with torch.no_grad():
+            self.reservoir.W_out.zero_()
 
     def _prepare_sequence(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Prepare input and target sequences for a single example."""
@@ -222,13 +223,12 @@ class SakuraReservoir:
             unscaled_data = scaler.inverse_transform(scaled_data)
         return unscaled_data
 
-    def test(self, dt: float = 0.1):
+    def test(self, dt: float = 0.1, test_cutoff_date: Optional[datetime.datetime] = None):
         """
         Test the reservoir on the test set.
-        Instead of using a fractional cutoff, we use a fixed simulation window:
-          - The test sequence is assumed to start on August 1 (of test_year)
-          - It is run until February 28 (of test_year+1), so the cutoff is computed accordingly.
-        The model is expected to predict blossom dates based on data up to February 28.
+        The test simulation always begins on August 1 of the test_year.
+        The simulation is run until the provided cutoff date (defaulting to February 28 of test_year+1)
+        so that the model should predict the blossom dates from then on.
         """
         # Turn off noise during testing
         self.reservoir.noise_scaling = 0.0
@@ -236,17 +236,18 @@ class SakuraReservoir:
         tqdm.write(f"\nTesting on {len(self.test_indices)} sequences for test year {self.test_year}...")
 
         predictions = []
-        # For each test example:
         for test_idx in tqdm(self.test_indices, desc=f"Testing {self.tqdm_bar_position}", position=self.tqdm_bar_position):
             row = self.df.iloc[test_idx]
             inputs, targets, seq_length = self._prepare_sequence(test_idx)
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
 
-            # Compute cutoff based on a fixed test window:
-            # Test window always starts at August 1 of test_year and ends at February 28 of test_year+1.
+            # Fixed test window: start at August 1 of test_year.
             test_start_date = datetime.datetime(self.test_year, 8, 1)
-            test_cutoff_date = datetime.datetime(self.test_year + 1, 2, 28)
+            # Use the provided cutoff date or default to February 28 of test_year+1.
+            if test_cutoff_date is None:
+                test_cutoff_date = datetime.datetime(self.test_year + 1, 2, 28)
+            # Determine cutoff (in days) from the start date.
             cutoff_days = (test_cutoff_date - test_start_date).days + 1
             cutoff = min(cutoff_days, seq_length)
 
@@ -292,9 +293,9 @@ class SakuraReservoir:
                 'pred_full_sequence': unscaled_pred_full.tolist(),
                 'cutoff': cutoff,
                 'cutoff_date': (test_start_date + datetime.timedelta(days=cutoff)).strftime("%Y-%m-%d"),
-                'pred_first_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) + 
+                'pred_first_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) +
                                           datetime.timedelta(days=float(unscaled_pred_first[-1]))).strftime("%Y-%m-%d"),
-                'pred_full_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) + 
+                'pred_full_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) +
                                          datetime.timedelta(days=float(unscaled_pred_full[-1]))).strftime("%Y-%m-%d"),
                 'full_length': int(seq_length.item()),
                 'mae_first': mae_first,
@@ -359,13 +360,12 @@ def main(save_data_path: str,
          tqdm_bar_position: int = 0,
          device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
     """
-    This main function now runs an iterative experiment.
-    For each test year (e.g. from 2001 to 2020), it:
-      - Sets training data from 1950 up to test_year-1,
+    For each test year (e.g. from 2001 to 2020), the code:
+      - Updates the training/test split,
       - Trains the reservoir,
-      - Tests using a fixed window starting August 1 and cutting off at February 28,
-      - Saves the model and results,
-      - Resets the output weights before the next iteration.
+      - Tests the reservoir,
+      - Saves predictions, metrics, and model state (in a subfolder for that test year),
+      - Resets the reservoir's output weights before the next iteration.
     """
     # Create the save folder if it doesn't exist.
     if save_data_path[-1] != '/':
@@ -379,7 +379,6 @@ def main(save_data_path: str,
         np.random.seed(seed)
 
     # Initialize the reservoir.
-    # (We create one instance and then update its training/test years in the loop.)
     sakura_rc = SakuraReservoir(
         reservoir_size=dim_reservoir,
         tau=10.0,
@@ -395,7 +394,7 @@ def main(save_data_path: str,
 
     # Loop over test years (for example, from 2001 to 2020).
     for test_year in range(2001, 2021):
-        training_end_year = test_year - 1  # training from 1950 up to previous year
+        training_end_year = test_year - 1  # training from 1950 up to the previous year
         tqdm.write(f"\n===== Training with data up to {training_end_year} and testing on {test_year} =====")
 
         # Update the training/test split based on year.
@@ -404,21 +403,19 @@ def main(save_data_path: str,
         # Train the reservoir.
         sakura_rc.train(dt=dt, n_epochs=num_epochs)
 
-        # Save the model state for this iteration.
-        if save_model_path is not None:
-            iter_model_path = f"{save_model_path}_test_year_{test_year}.pt"
-            sakura_rc.save_model(save_path=iter_model_path)
-
-        # Dump parameters.
-        sakura_rc.dump_parameters(save_path=save_data_path)
-
-        # Test the reservoir (the test window uses August 1 to Feb 28).
-        predictions_df, metrics = sakura_rc.test(dt=dt)
-
-        # Save predictions and metrics.
+        # Create a subfolder for this test year.
         folder = os.path.join(save_data_path, f'test_year_{test_year}/')
         if not os.path.exists(folder):
             os.makedirs(folder)
+
+        # Dump network parameters in the subfolder.
+        sakura_rc.dump_parameters(save_path=folder)
+
+        # Define the test cutoff date (February 28 of test_year+1) and test the reservoir.
+        test_cutoff_date = datetime.datetime(test_year + 1, 2, 28)
+        predictions_df, metrics = sakura_rc.test(dt=dt, test_cutoff_date=test_cutoff_date)
+
+        # Save predictions and metrics.
         predictions_df.to_parquet(os.path.join(folder, 'predictions.parquet'))
         with open(os.path.join(folder, 'metrics.json'), 'w') as f:
             json.dump(metrics, f)
@@ -428,8 +425,14 @@ def main(save_data_path: str,
             from utils import plot_mae_results
             plot_mae_results(predictions_df=predictions_df, save_path=os.path.join(folder, 'mae'))
 
-        # Reset the reservoir's output (readout) weights before next iteration.
+        # *** Save the reservoir model in the corresponding subfolder before resetting ***
+        if save_model_path is not None:
+            model_save_path = os.path.join(folder, 'reservoir_model.pt')
+            sakura_rc.save_model(save_path=model_save_path)
+
+        # Reset the reservoir's output (readout) weights before the next iteration.
         sakura_rc.reset_output_weights()
+
 
 
 if __name__ == "__main__":
@@ -450,7 +453,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     save_data_path = f'src_test/reservoir_size_{args.dim_reservoir}/sim_id_{args.sim_id}/'
-    # Note: test_cutoff is no longer used since the test window is fixed.
     
     main(save_data_path=save_data_path,
          save_model_path=save_data_path + 'reservoir_model',
