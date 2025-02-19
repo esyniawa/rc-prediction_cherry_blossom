@@ -35,6 +35,6 @@ def convert_to_csv(file_path, output_csv):
     combined_data.to_csv(output_csv, index=False, encoding='utf-8')
 
 if __name__ == "__main__":
-    file_path = "sorted.xlsx"
-    output_csv = "humidity_data.csv"
+    file_path = "./data/sorted.xlsx"
+    output_csv = "./data/humidity_data.csv"
     convert_to_csv(file_path, output_csv)
