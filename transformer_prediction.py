@@ -46,9 +46,17 @@ class SakuraTransformer:
                  seed: Optional[int] = None,
                  load_pretrained_model: Optional[str] = None,
                  sim_id: int = 0,
+                 training_end_year: Optional[int] = None,
+                 test_year: Optional[int] = None,
                  device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
                  number_of_devices: int = 1):
-        """Initialize the Sakura Transformer"""
+        """Initialize the Sakura Transformer with custom train/test splitting.
+        
+        If training_end_year and test_year are provided, then:
+          - Training set: rows with 'year' <= training_end_year.
+          - Test set: rows with 'year' == test_year.
+        Otherwise, a random split is performed.
+        """
         tqdm.write(f"Simulation ID: {sim_id} | PyTorch version: {torch.__version__} | Using device: {device}")
 
         self.device = device
@@ -56,6 +64,8 @@ class SakuraTransformer:
         self.seed = seed
         self.tqdm_bar_position = sim_id
         self.batch_size = batch_size
+        self.training_end_year = training_end_year
+        self.test_year = test_year
 
         # Load and process data
         self.df, self.scalers = self._load_sakura_data()
@@ -83,16 +93,24 @@ class SakuraTransformer:
         if load_pretrained_model is not None:
             self.model.load(load_pretrained_model)
 
-        # Split data
-        self.train_indices, self.test_indices = self._split_data()
+        # Split data: use custom split if training_end_year and test_year are provided,
+        # otherwise fall back to a random split.
+        if self.training_end_year is not None and self.test_year is not None:
+            self.train_indices, self.test_indices = self._split_data_custom()
+        else:
+            self.train_indices, self.test_indices = self._split_data_default()
 
     def _load_sakura_data(self) -> Tuple[pd.DataFrame, dict]:
-        """Load the pre-processed and scaled sakura data"""
+        """Load the pre-processed and scaled sakura data."""
         from sakura_data import load_sakura_data
-        return load_sakura_data()
+        df, scalers = load_sakura_data()
+        # Ensure that 'data_start_date' is a datetime and that index is reset.
+        df['data_start_date'] = pd.to_datetime(df['data_start_date'])
+        df.reset_index(drop=True, inplace=True)
+        return df, scalers
 
-    def _split_data(self) -> Tuple[List[int], List[int]]:
-        """Split data into training and testing sets"""
+    def _split_data_default(self) -> Tuple[List[int], List[int]]:
+        """Random split if no custom split is provided."""
         all_indices = np.arange(len(self.df))
         train_idx, test_idx = train_test_split(
             all_indices,
@@ -101,32 +119,39 @@ class SakuraTransformer:
         )
         return train_idx.tolist(), test_idx.tolist()
 
+    def _split_data_custom(self) -> Tuple[List[int], List[int]]:
+        """
+        Custom split based on years.
+        Training: rows with 'year' <= training_end_year.
+        Testing: rows with 'year' == test_year.
+        """
+        train_indices = self.df.index[self.df['year'] <= self.training_end_year].tolist()
+        test_indices = self.df.index[self.df['year'] == self.test_year].tolist()
+        return train_indices, test_indices
+
     def _prepare_sequence(self, idx: int) -> Tuple[TimeSeries, TimeSeries]:
         """
-        Prepare input and target sequences for a single example
-        :returns: - features_ts: TimeSeries containing [temperature, lat, lng]
-                  - targets_ts: TimeSeries containing [countdown_first, countdown_full]
+        Prepare input and target sequences for a single example.
+        Returns:
+          - features_ts: TimeSeries containing [temperature, lat, lng]
+          - targets_ts: TimeSeries containing [countdown_first, countdown_full]
         """
         row = self.df.iloc[idx]
 
-        # Create time index
         start_date = row['data_start_date']
         dates = pd.date_range(start=start_date, periods=len(row['temps_to_full']), freq='D')
 
-        # Features: temperature, lat, lng
         features = pd.DataFrame({
             'temperature': row['temps_to_full'],
             'lat': [row['lat']] * len(dates),
             'lng': [row['lng']] * len(dates)
         }, index=dates)
 
-        # Targets: countdowns
         targets = pd.DataFrame({
             'countdown_first': row['countdown_to_first'],
             'countdown_full': row['countdown_to_full']
         }, index=dates)
 
-        # Convert to TimeSeries
         features_ts = TimeSeries.from_dataframe(features)
         targets_ts = TimeSeries.from_dataframe(targets)
 
@@ -134,18 +159,17 @@ class SakuraTransformer:
 
     @staticmethod
     def _inverse_transform_predictions(scaled_data: np.ndarray, scaler, is_sequence: bool = True) -> np.ndarray:
-        """Inverse transform scaled predictions back to original scale"""
+        """Inverse transform scaled predictions back to the original scale."""
         if is_sequence:
             original_shape = scaled_data.shape
             reshaped_data = scaled_data.reshape(-1, 1)
             unscaled_data = scaler.inverse_transform(reshaped_data).reshape(original_shape)
         else:
             unscaled_data = scaler.inverse_transform(scaled_data)
-
         return unscaled_data
 
     def train(self):
-        """Train the transformer"""
+        """Train the transformer on the custom training set."""
         train_features = []
         train_targets = []
 
@@ -161,62 +185,63 @@ class SakuraTransformer:
         )
 
     def test(self,
-             sequence_offset: float = 1.0,
+             test_cutoff_date: Optional[datetime.datetime] = None,
              logging: bool = False):
-        """Test the model"""
+        """
+        Test the model on the custom test set.
+        For each test example, the simulation window is fixed:
+          - It starts on August 1 of the year extracted from data_start_date.
+          - It is run until the provided cutoff date (defaulting to February 28 of the following year).
+        """
         predictions = []
 
-        for test_idx in self.test_indices:
-            # Get metadata
+        for test_idx in tqdm(self.test_indices, desc="Testing", position=self.tqdm_bar_position):
             row = self.df.iloc[test_idx]
-
-            # Prepare sequences
             features, targets = self._prepare_sequence(test_idx)
 
-            # Calculate cutoff
-            cutoff = int(len(features) * sequence_offset)
+            # Force test window: start on August 1 of the example's start year.
+            start_year = row['data_start_date'].year
+            test_start_date = datetime.datetime(start_year, 8, 1)
+            if test_cutoff_date is None:
+                cutoff_date = datetime.datetime(start_year + 1, 2, 28)
+            else:
+                cutoff_date = datetime.datetime(start_year + 1, test_cutoff_date.month, test_cutoff_date.day)
+            cutoff_days = (cutoff_date - test_start_date).days + 1
+            cutoff = min(cutoff_days, len(features))
 
-            # Use data up to cutoff (exclusive) to predict cutoff point
             pred_features = features[:cutoff]
             true_targets = targets[:cutoff]
 
-            # Generate predictions for the cutoff point
             pred_targets = self.model.predict(
                 n=1,
-                series=true_targets[:-1],  # Use all target values except the last one
-                past_covariates=pred_features[:-1],  # Use all feature values except the last one
+                series=true_targets[:-1],
+                past_covariates=pred_features[:-1],
                 show_warnings=logging
             )
 
-            # Convert TimeSeries to numpy array
-            pred_targets = TimeSeries.values(pred_targets)[0]
-            true_targets = TimeSeries.values(targets[cutoff])[0]
+            pred_values = TimeSeries.values(pred_targets)[0]
+            true_value = TimeSeries.values(targets[cutoff])[0]
 
-            # Unscale predictions and targets
             unscaled_pred_first = self._inverse_transform_predictions(
-                pred_targets[0],
+                pred_values[0],
                 self.scalers['countdown_to_first']
             )
             unscaled_pred_full = self._inverse_transform_predictions(
-                pred_targets[1],
+                pred_values[1],
                 self.scalers['countdown_to_full']
             )
-
             unscaled_true_first = self._inverse_transform_predictions(
-                true_targets[0],
+                true_value[0],
                 self.scalers['countdown_to_first']
             )
             unscaled_true_full = self._inverse_transform_predictions(
-                true_targets[1],
+                true_value[1],
                 self.scalers['countdown_to_full']
             )
 
-            print(unscaled_pred_first, unscaled_pred_full, unscaled_true_first, unscaled_true_full)
-            # Calculate errors
             mae_first = np.abs(unscaled_pred_first - unscaled_true_first)
             mae_full = np.abs(unscaled_pred_full - unscaled_true_full)
 
-            # Store results with proper sequences up to cutoff
             predictions.append({
                 'site_name': row['site_name'],
                 'year': row['year'],
@@ -228,21 +253,19 @@ class SakuraTransformer:
                 'pred_first': float(unscaled_pred_first),
                 'pred_full': float(unscaled_pred_full),
                 'cutoff': cutoff,
-                'cutoff_date': row['data_start_date'] + datetime.timedelta(days=cutoff),
-                'pred_first_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=float(unscaled_pred_first)),
-                'pred_full_bloom_date': row['data_start_date'] + datetime.timedelta(days=cutoff) + datetime.timedelta(days=float(unscaled_pred_full)),
+                'cutoff_date': (test_start_date + datetime.timedelta(days=cutoff)).strftime("%Y-%m-%d"),
+                'pred_first_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) + 
+                                          datetime.timedelta(days=float(unscaled_pred_first))).strftime("%Y-%m-%d"),
+                'pred_full_bloom_date': (test_start_date + datetime.timedelta(days=cutoff) + 
+                                         datetime.timedelta(days=float(unscaled_pred_full))).strftime("%Y-%m-%d"),
                 'mae_first': mae_first,
                 'mae_full': mae_full
             })
 
-        # Convert predictions to DataFrame
         predictions_df = pd.DataFrame(predictions)
-
-        # Calculate overall metrics
         avg_mae_first = predictions_df['mae_first'].mean()
         avg_mae_full = predictions_df['mae_full'].mean()
 
-        # Print summary statistics
         tqdm.write(f"\nMAE (days):")
         tqdm.write(f"  First bloom: {avg_mae_first:.2f}")
         tqdm.write(f"  Full bloom: {avg_mae_full:.2f}")
@@ -256,15 +279,15 @@ class SakuraTransformer:
         return predictions_df, metrics
 
     def save_model(self, save_path: str):
-        """Save the transformer model"""
+        """Save the transformer model."""
         self.model.save(save_path)
 
     def load_model(self, load_path: str):
-        """Load a saved transformer model"""
+        """Load a saved transformer model."""
         self.model.load(load_path)
 
     def dump_parameters(self, save_path: Optional[str] = None) -> dict:
-        """Get model parameters as a dictionary"""
+        """Get model parameters as a dictionary."""
         params = {
             'hidden_size': self.model.d_model,
             'num_attention_heads': self.model.nhead,
@@ -284,7 +307,6 @@ class SakuraTransformer:
 
 
 def main(save_data_path: str,
-         test_cutoff: list[float],
          d_model: int,
          num_epochs: int,
          training_set_size: float = 0.8,
@@ -298,67 +320,78 @@ def main(save_data_path: str,
          seed: Optional[int] = None,
          tqdm_bar_position: int = 0,
          device: torch.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')):
-
-    assert 0 < training_set_size < 1, "Training set size must be between 0 and 1"
-
+    """
+    This main function iterates over test years (2001 to 2020).
+    For each test year:
+      - Training is on data from the 1950s up to (test_year - 1).
+      - Testing is on data for test_year.
+      - The model is trained, tested (using a fixed window from August 1 to February 28 of the following year),
+        and then saved (along with predictions and metrics) in a subfolder for that test year.
+    """
     if do_plot:
         from utils import plot_mae_results
 
-    # Create save path
     if save_data_path[-1] != '/':
         save_data_path += '/'
     if not os.path.exists(save_data_path):
         os.makedirs(save_data_path)
 
-    # Set random seed
     if seed is not None:
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-    # Initialize transformer
-    sakura_transformer = SakuraTransformer(
-        d_model=d_model,
-        n_heads=num_attention_heads,
-        dropout=dropout,
-        train_percentage=training_set_size,
-        batch_size=batch_size,
-        num_encoder_layers=num_encoder_layers,
-        num_decoder_layers=num_decoder_layers,
-        num_epochs=num_epochs,
-        seed=seed,
-        device=device,
-        sim_id=tqdm_bar_position
-    )
+    # Define the fixed test cutoff date (February 28). (Year will be adjusted per example.)
+    cutoff_date = datetime.datetime(2000, 2, 28)  # Placeholder year; month and day are used.
 
-    # Train
-    sakura_transformer.train()
+    # Iterate over test years from 2001 to 2020.
+    for test_year in range(2001, 2021):
+        training_end_year = test_year - 1  # Use data from 1950 up to test_year-1 for training.
+        tqdm.write(f"\n===== Training with data up to {training_end_year} and testing on {test_year} =====")
 
-    # Save model
-    if save_model_path is not None:
-        sakura_transformer.save_model(save_model_path)
+        # Create a new instance with custom split.
+        sakura_transformer = SakuraTransformer(
+            d_model=d_model,
+            n_heads=num_attention_heads,
+            dropout=dropout,
+            train_percentage=training_set_size,  # Not used since custom splitting is provided.
+            batch_size=batch_size,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            num_epochs=num_epochs,
+            seed=seed,
+            training_end_year=training_end_year,
+            test_year=test_year,
+            device=device,
+            sim_id=tqdm_bar_position
+        )
 
-    # Save parameters
-    sakura_transformer.dump_parameters(save_path=save_data_path)
+        # Train the transformer.
+        sakura_transformer.train()
 
-    # Test
-    for cutoff in test_cutoff:
-        # suppress print outs
+        # Save the model for this test year.
+        if save_model_path is not None:
+            iter_model_path = f"{save_model_path}_test_year_{test_year}.pt"
+            sakura_transformer.save_model(iter_model_path)
+
+        # Dump parameters (saved in the main save_data_path).
+        sakura_transformer.dump_parameters(save_path=save_data_path)
+
+        # Test (suppress extra output)
         with suppress_output():
-            predictions_df, metrics = sakura_transformer.test(sequence_offset=cutoff)
+            predictions_df, metrics = sakura_transformer.test(test_cutoff_date=cutoff_date)
 
-        # Save predictions
-        folder = save_data_path + f'test_cutoff_{cutoff}/'
+        # Create a subfolder for this test year.
+        folder = os.path.join(save_data_path, f'test_year_{test_year}/')
         if not os.path.exists(folder):
             os.makedirs(folder)
 
-        predictions_df.to_parquet(folder + 'predictions.parquet')
-
-        # Save metrics
-        with open(folder + 'metrics.json', 'w') as f:
+        # Save predictions (as a Parquet file) and metrics (as JSON).
+        predictions_df.to_parquet(os.path.join(folder, 'predictions.parquet'))
+        with open(os.path.join(folder, 'metrics.json'), 'w') as f:
             json.dump(metrics, f)
 
         if do_plot:
-            plot_mae_results(predictions_df=predictions_df, save_path=folder + 'mae')
+            plot_mae_results(predictions_df=predictions_df, save_path=os.path.join(folder, 'mae'))
 
 
 if __name__ == "__main__":
@@ -378,15 +411,11 @@ if __name__ == "__main__":
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
 
-    # Folder
     save_data_path = f'src_test/transformer_d{args.d_model}_h{args.num_heads}/sim_id_{args.sim_id}/'
-    cutoffs = [0.500, 0.600, 0.700, 0.750, 0.800, 0.825, 0.850, 0.875, 0.900, 0.920, 0.940, 0.950, 0.960, 0.970, 0.980,
-               0.990]
-
-    # Run model
+    save_model_path = save_data_path + 'transformer_model'
+    
     main(save_data_path=save_data_path,
-         save_model_path=save_data_path + '/transformer_model.pt',
-         test_cutoff=cutoffs,
+         save_model_path=save_model_path,
          num_epochs=args.num_epochs,
          d_model=args.d_model,
          training_set_size=args.training_set_size,
